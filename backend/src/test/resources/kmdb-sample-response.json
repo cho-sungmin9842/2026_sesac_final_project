@@ -1,0 +1,49 @@
+{
+  "TotalCount": 1,
+  "Query": "기생충",
+  "Data": [
+    {
+      "Result": [
+        {
+          "movieId": "K19980001",
+          "movieSeq": "01",
+          "title": "!HS 기생충 !HE",
+          "titleEng": "Parasite",
+          "titleOrg": "",
+          "prodYear": "2019",
+          "nation": "한국",
+          "company": "바른손이앤에이(주)",
+          "genre": "드라마,코미디",
+          "runtime": "132",
+          "rating": "15세이상관람가",
+          "type": "장편",
+          "keywords": "계급,가족,반지하",
+          "posters": "http://kmdb.or.kr/poster1.jpg|http://kmdb.or.kr/poster2.jpg",
+          "stlls": "http://kmdb.or.kr/still1.jpg",
+          "directors": {
+            "director": [
+              { "directorNm": "!HS 봉준호 !HE", "directorEnNm": "Bong, Joon-ho", "directorId": "10000809" }
+            ]
+          },
+          "actors": {
+            "actor": [
+              { "actorNm": "송강호", "actorEnNm": "Song, Kang-ho", "actorId": "10001378", "cast": "기택 역" },
+              { "actorNm": "이선균", "actorEnNm": "Lee, Sun-kyun", "actorId": "10007119", "cast": "박사장 역" }
+            ]
+          },
+          "plots": {
+            "plot": [
+              { "plotLang": "국문", "plotText": "전원백수인 기택네 가족은 장남 기우의 친구가 알바 자리를 제안하며 벌어지는 예기치 못한 사건들을 그린 작품." }
+            ]
+          },
+          "vods": {
+            "vod": [
+              { "vodClass": "예고편 [1차예고편]", "vodUrl": "https://www.kmdb.or.kr/trailer/trailerPlayPop?pFileNm=MK041673_P02.mp4" },
+              { "vodClass": "", "vodUrl": "" }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}
