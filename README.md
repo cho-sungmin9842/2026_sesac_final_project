@@ -1,6 +1,6 @@
 #경로
 
-backend->src->main->resources->application-local.yml
+backend/src/main/resources/application-local.yml
 
 #
 
