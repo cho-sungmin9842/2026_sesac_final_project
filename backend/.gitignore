@@ -38,4 +38,4 @@ out/
 
 ### Local secrets ###
 # KMDB ServiceKey 등 개인 로컬 설정 - 절대 커밋하지 않습니다.
-src/main/resources/application-local.yml
+#src/main/resources/application-local.yml
