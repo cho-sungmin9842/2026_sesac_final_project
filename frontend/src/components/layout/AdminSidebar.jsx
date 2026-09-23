@@ -46,7 +46,7 @@ function AdminSidebar() {
       </nav>
 
       <div className="border-t border-white/5 px-2 pt-4 text-sm text-gray-400">
-        <p className="mb-2 truncate">{user?.email}</p>
+        <p className="mb-2 truncate">{user?.username}</p>
         <button type="button" onClick={handleLogout} className="text-xs hover:text-white">
           로그아웃
         </button>

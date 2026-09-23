@@ -8,13 +8,13 @@ function SignupPage() {
   const navigate = useNavigate()
 
   const [nickname, setNickname] = useState('')
-  const [email, setEmail] = useState('')
+  const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [passwordConfirm, setPasswordConfirm] = useState('')
   const [agreed, setAgreed] = useState(false)
   const [error, setError] = useState('')
 
-  const handleSubmit = (event) => {
+  const handleSubmit = async (event) => {
     event.preventDefault()
 
     if (password !== passwordConfirm) {
@@ -26,8 +26,13 @@ function SignupPage() {
       return
     }
 
-    const user = signup(nickname, email)
-    navigate(user.isAdmin ? '/admin/reports' : '/', { replace: true })
+    setError('')
+    try {
+      const user = await signup(nickname, username, password)
+      navigate(user.isAdmin ? '/admin/reports' : '/', { replace: true })
+    } catch (err) {
+      setError(err.message)
+    }
   }
 
   return (
@@ -52,16 +57,16 @@ function SignupPage() {
         </div>
 
         <div>
-          <label htmlFor="signup-email" className="mb-1 block text-sm font-medium text-slate-700">
-            이메일
+          <label htmlFor="signup-username" className="mb-1 block text-sm font-medium text-slate-700">
+            아이디
           </label>
           <input
-            id="signup-email"
-            type="email"
+            id="signup-username"
+            type="text"
             required
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-            placeholder="example@email.com"
+            value={username}
+            onChange={(event) => setUsername(event.target.value)}
+            placeholder="아이디를 입력하세요"
             className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none"
           />
         </div>

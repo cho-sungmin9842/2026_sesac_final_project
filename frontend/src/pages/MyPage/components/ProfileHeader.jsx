@@ -5,9 +5,7 @@ function ProfileHeader({ user }) {
         <span className="block h-16 w-16 rounded-full bg-gradient-to-br from-orange-400 to-red-500" />
         <div>
           <h1 className="text-lg font-bold text-white">{user.nickname} 님</h1>
-          <p className="text-sm text-gray-400">
-            가입일 {user.joinedAt} · 등급 {user.tier}
-          </p>
+          <p className="text-sm text-gray-400">가입일 {user.joinedAt}</p>
         </div>
       </div>
 

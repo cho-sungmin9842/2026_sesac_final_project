@@ -10,11 +10,12 @@ const SOCIAL_BUTTONS = [
 ]
 
 function LoginPage() {
-  const { login } = useAuth()
+  const { login, loginSocial } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
-  const [email, setEmail] = useState('')
+  const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
+  const [error, setError] = useState('')
 
   const goAfterLogin = (user) => {
     if (user.isAdmin) {
@@ -24,30 +25,40 @@ function LoginPage() {
     navigate(location.state?.from?.pathname ?? '/', { replace: true })
   }
 
-  const handleSubmit = (event) => {
+  const handleSubmit = async (event) => {
     event.preventDefault()
-    if (!email || !password) return
-    goAfterLogin(login(email))
+    if (!username || !password) return
+    setError('')
+    try {
+      goAfterLogin(await login(username, password))
+    } catch (err) {
+      setError(err.message)
+    }
   }
 
-  const handleSocialLogin = (provider) => {
-    goAfterLogin(login(`${provider}-user@moviepick.example.com`))
+  const handleSocialLogin = async (provider) => {
+    setError('')
+    try {
+      goAfterLogin(await loginSocial(provider))
+    } catch (err) {
+      setError(err.message)
+    }
   }
 
   return (
     <AuthShell mode="login" tagline="당신의 취향을 배우는 AI와 함께, 오늘 볼 영화를 가장 빠르게 찾아보세요">
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
-          <label htmlFor="email" className="mb-1 block text-sm font-medium text-slate-700">
-            이메일
+          <label htmlFor="username" className="mb-1 block text-sm font-medium text-slate-700">
+            아이디
           </label>
           <input
-            id="email"
-            type="email"
+            id="username"
+            type="text"
             required
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-            placeholder="example@email.com"
+            value={username}
+            onChange={(event) => setUsername(event.target.value)}
+            placeholder="아이디를 입력하세요"
             className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none"
           />
         </div>
@@ -66,6 +77,8 @@ function LoginPage() {
             className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-indigo-500 focus:outline-none"
           />
         </div>
+
+        {error && <p className="text-xs text-red-500">{error}</p>}
 
         <div className="flex items-center justify-between text-xs text-slate-500">
           <label className="flex items-center gap-1.5">

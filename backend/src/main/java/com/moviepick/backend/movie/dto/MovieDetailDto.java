@@ -18,6 +18,8 @@ public record MovieDetailDto(
         String posterUrl,
         List<String> stillUrls,
         List<String> keywords,
-        List<TrailerDto> trailers
+        List<TrailerDto> trailers,
+        Double averageScore,
+        int reviewCount
 ) {
 }

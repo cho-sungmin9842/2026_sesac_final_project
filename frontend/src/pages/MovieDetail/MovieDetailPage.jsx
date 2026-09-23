@@ -2,7 +2,9 @@ import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { useAuth } from '../../auth/AuthContext'
 import { getMovieDetail } from '../../api/movieApi'
-import { addReview, deleteReview, getReviews, updateReview } from '../../reviews/reviewsStorage'
+import { addReview, deleteReview, getReviews, updateReview } from '../../api/reviewApi'
+import { addWishlist, isWishlisted, removeWishlist } from '../../api/wishlistApi'
+import { addWatched, isWatched, removeWatched } from '../../api/watchedApi'
 import AiSummaryBox from './components/AiSummaryBox'
 import PosterLink from './components/PosterLink'
 import ReviewList from './components/ReviewList'
@@ -18,16 +20,20 @@ function MovieDetailPage() {
   const [reviews, setReviews] = useState([])
   const [isDialogOpen, setDialogOpen] = useState(false)
   const [editingReview, setEditingReview] = useState(null)
+  const [wishlisted, setWishlisted] = useState(false)
+  const [watched, setWatched] = useState(false)
 
   useEffect(() => {
     let cancelled = false
     setStatus('loading')
 
-    getMovieDetail(id)
-      .then((dto) => {
+    Promise.all([getMovieDetail(id), getReviews(id), isWishlisted(user.id, id), isWatched(user.id, id)])
+      .then(([dto, reviewList, wishlistedFlag, watchedFlag]) => {
         if (cancelled) return
         setDetail(normalizeDetail(dto))
-        setReviews(getReviews(id))
+        setReviews(reviewList)
+        setWishlisted(wishlistedFlag)
+        setWatched(watchedFlag)
         setStatus('ready')
       })
       .catch((error) => {
@@ -39,17 +45,49 @@ function MovieDetailPage() {
     return () => {
       cancelled = true
     }
-  }, [id])
+  }, [id, user.id])
 
-  const handleReviewSubmit = ({ score, content }) => {
-    if (editingReview) {
-      updateReview(id, editingReview.id, { score, content })
-    } else {
-      addReview(id, { author: user?.nickname ?? '익명', score, content })
+  const handleToggleWishlist = async () => {
+    try {
+      if (wishlisted) {
+        await removeWishlist(user.id, id)
+        setWishlisted(false)
+      } else {
+        await addWishlist(user.id, { movieId: id, movieTitle: detail.title, posterUrl: detail.posterUrl })
+        setWishlisted(true)
+      }
+    } catch (error) {
+      window.alert(error.message)
     }
-    setReviews(getReviews(id))
-    setDialogOpen(false)
-    setEditingReview(null)
+  }
+
+  const handleToggleWatched = async () => {
+    try {
+      if (watched) {
+        await removeWatched(user.id, id)
+        setWatched(false)
+      } else {
+        await addWatched(user.id, { movieId: id, movieTitle: detail.title, posterUrl: detail.posterUrl })
+        setWatched(true)
+      }
+    } catch (error) {
+      window.alert(error.message)
+    }
+  }
+
+  const handleReviewSubmit = async ({ score, content }) => {
+    try {
+      if (editingReview) {
+        await updateReview(id, editingReview.id, user.id, { movieTitle: detail.title, score, content })
+      } else {
+        await addReview(id, user.id, { movieTitle: detail.title, score, content })
+      }
+      setReviews(await getReviews(id))
+      setDialogOpen(false)
+      setEditingReview(null)
+    } catch (error) {
+      window.alert(error.message)
+    }
   }
 
   const handleReviewEdit = (review) => {
@@ -57,10 +95,14 @@ function MovieDetailPage() {
     setDialogOpen(true)
   }
 
-  const handleReviewDelete = (review) => {
+  const handleReviewDelete = async (review) => {
     if (!window.confirm('이 리뷰를 삭제할까요?')) return
-    deleteReview(id, review.id)
-    setReviews(getReviews(id))
+    try {
+      await deleteReview(id, review.id, user.id)
+      setReviews(await getReviews(id))
+    } catch (error) {
+      window.alert(error.message)
+    }
   }
 
   const closeDialog = () => {
@@ -131,15 +173,25 @@ function MovieDetailPage() {
             </button>
             <button
               type="button"
-              className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-500"
+              onClick={handleToggleWishlist}
+              className={`rounded-lg px-4 py-2 text-sm font-semibold ${
+                wishlisted
+                  ? 'bg-pink-500/20 text-pink-300 hover:bg-pink-500/30'
+                  : 'bg-indigo-600 text-white hover:bg-indigo-500'
+              }`}
             >
-              ♡ 찜하기
+              {wishlisted ? '♥ 찜한 영화' : '♡ 찜하기'}
             </button>
             <button
               type="button"
-              className="rounded-lg border border-gray-700 px-4 py-2 text-sm font-semibold text-gray-200 hover:bg-slate-800"
+              onClick={handleToggleWatched}
+              className={`rounded-lg border px-4 py-2 text-sm font-semibold ${
+                watched
+                  ? 'border-emerald-600 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20'
+                  : 'border-gray-700 text-gray-200 hover:bg-slate-800'
+              }`}
             >
-              시청완료 표시
+              {watched ? '✓ 시청완료' : '시청완료 표시'}
             </button>
           </div>
         </div>
@@ -160,7 +212,7 @@ function MovieDetailPage() {
           {reviews.length > 0 ? (
             <ReviewList
               reviews={reviews}
-              currentUser={user?.nickname}
+              currentUser={user?.id}
               onEdit={handleReviewEdit}
               onDelete={handleReviewDelete}
             />

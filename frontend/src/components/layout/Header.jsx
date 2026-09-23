@@ -29,7 +29,7 @@ function Header() {
         <span className="flex h-7 w-7 items-center justify-center rounded-md bg-gradient-to-br from-indigo-500 to-purple-500">
           🎬
         </span>
-        MOVIEPICK
+        SESAC MOVIE
       </NavLink>
 
       <nav className="flex items-center gap-5 text-sm font-medium text-gray-300">

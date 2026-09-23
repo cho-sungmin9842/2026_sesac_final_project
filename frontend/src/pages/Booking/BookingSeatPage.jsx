@@ -1,8 +1,11 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
+import { useAuth } from '../../auth/AuthContext'
 import { getMovieDetail } from '../../api/movieApi'
+import { createBooking, getReservedSeats } from '../../api/bookingApi'
+import PosterPlaceholder from '../../components/common/PosterPlaceholder'
 import SeatMap from './components/SeatMap'
-import { PRICE_PER_SEAT, SHOWTIMES, THEATERS, getBookingDates, getReservedSeats } from './bookingData'
+import { PRICE_PER_SEAT, SHOWTIMES, THEATERS, getBookingDates } from './bookingData'
 
 const DATES = getBookingDates()
 
@@ -22,12 +25,14 @@ function PillButton({ active, onClick, children }) {
 
 function BookingSeatPage() {
   const { id } = useParams()
+  const { user } = useAuth()
   const [movie, setMovie] = useState(null)
   const [status, setStatus] = useState('loading')
   const [theater, setTheater] = useState(THEATERS[0])
   const [dateIndex, setDateIndex] = useState(0)
   const [showtime, setShowtime] = useState(SHOWTIMES[0])
   const [selectedSeats, setSelectedSeats] = useState([])
+  const [reservedSeats, setReservedSeats] = useState(new Set())
 
   useEffect(() => {
     let cancelled = false
@@ -47,15 +52,20 @@ function BookingSeatPage() {
     }
   }, [id])
 
-  const reservedSeats = useMemo(
-    () => getReservedSeats(`${id}-${theater}-${DATES[dateIndex].value}-${showtime}`),
-    [id, theater, dateIndex, showtime],
-  )
+  const showDate = DATES[dateIndex].value
 
-  // 상영관/날짜/회차가 바뀌면 좌석 배치도 달라지니 선택은 초기화합니다.
+  const refreshReservedSeats = () => {
+    getReservedSeats({ movieId: id, theater, showDate, showtime }).then((dto) => {
+      setReservedSeats(new Set(dto.seats))
+    })
+  }
+
   useEffect(() => {
+    refreshReservedSeats()
+    // 상영관/날짜/회차가 바뀌면 좌석 배치도 달라지니 선택은 초기화합니다.
     setSelectedSeats([])
-  }, [theater, dateIndex, showtime])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, theater, showDate, showtime])
 
   const toggleSeat = (seatId) => {
     setSelectedSeats((prev) =>
@@ -65,10 +75,24 @@ function BookingSeatPage() {
 
   const totalPrice = selectedSeats.length * PRICE_PER_SEAT
 
-  const handlePayment = () => {
+  const handlePayment = async () => {
     if (selectedSeats.length === 0) return
-    window.alert(`${selectedSeats.length}석 (${totalPrice.toLocaleString()}원) 결제가 완료되었습니다.`)
-    setSelectedSeats([])
+    try {
+      await createBooking(user.id, {
+        movieId: id,
+        movieTitle: movie.title,
+        theater,
+        showDate,
+        showtime,
+        seats: selectedSeats,
+      })
+      window.alert(`${selectedSeats.length}석 (${totalPrice.toLocaleString()}원) 결제가 완료되었습니다.`)
+      setSelectedSeats([])
+      refreshReservedSeats()
+    } catch (error) {
+      window.alert(error.message)
+      refreshReservedSeats()
+    }
   }
 
   return (
@@ -84,9 +108,11 @@ function BookingSeatPage() {
         {status === 'ready' && (
           <>
             <div className="mt-4 flex items-center gap-4 border-b border-gray-200 pb-6">
-              <div className="h-24 w-16 shrink-0 overflow-hidden rounded-lg bg-gradient-to-br from-indigo-600 to-purple-700">
-                {movie.posterUrl && (
+              <div className="h-24 w-16 shrink-0 overflow-hidden rounded-lg">
+                {movie.posterUrl ? (
                   <img src={movie.posterUrl} alt={movie.title} className="h-full w-full object-cover" />
+                ) : (
+                  <PosterPlaceholder compact className="bg-gradient-to-br from-indigo-600 to-purple-700" />
                 )}
               </div>
               <div>

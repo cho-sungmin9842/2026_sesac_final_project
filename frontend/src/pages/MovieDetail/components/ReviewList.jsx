@@ -23,14 +23,14 @@ function ReviewList({ reviews, currentUser, onEdit, onDelete }) {
   return (
     <div className="space-y-4">
       {reviews.map((review) => {
-        const isOwner = currentUser && review.author === currentUser
+        const isOwner = currentUser != null && review.userId === currentUser
         const date = formatDate(review.createdAt)
 
         return (
-          <div key={review.id ?? review.author} className="rounded-lg bg-slate-900 p-4">
+          <div key={review.id} className="rounded-lg bg-slate-900 p-4">
             <div className="flex items-center justify-between">
               <p className="flex items-center gap-2 text-sm font-semibold text-gray-100">
-                📄 {review.author}
+                📄 {review.authorNickname}
               </p>
               <div className="flex items-center gap-3">
                 <Stars score={review.score} />

@@ -1,6 +1,6 @@
-import { genres, runtimeFilters, years } from './filterOptions'
+import { genreLabel, genres, runtimeFilters, years } from './filterOptions'
 
-function FilterGroup({ title, options, active, onSelect }) {
+function FilterGroup({ title, options, isActive, onSelect, getLabel = (option) => option }) {
   return (
     <div>
       <h4 className="mb-2 text-sm font-semibold text-gray-300">{title}</h4>
@@ -11,12 +11,12 @@ function FilterGroup({ title, options, active, onSelect }) {
             type="button"
             onClick={() => onSelect(option)}
             className={`rounded-md px-3 py-1.5 text-sm ${
-              active === option
+              isActive(option)
                 ? 'bg-indigo-600 text-white'
                 : 'bg-slate-800 text-gray-300 hover:bg-slate-700'
             }`}
           >
-            {option}
+            {getLabel(option)}
           </button>
         ))}
       </div>
@@ -43,21 +43,22 @@ function YearSelect({ options, active, onSelect }) {
   )
 }
 
-function FilterSidebar({ filters, onChange }) {
+function FilterSidebar({ filters, onChange, onToggleGenre }) {
   return (
     <aside className="w-56 shrink-0 space-y-6">
       <FilterGroup
         title="장르"
         options={genres}
-        active={filters.genre}
-        onSelect={(value) => onChange('genre', value)}
+        isActive={(option) => (option === '전체' ? filters.genres.length === 0 : filters.genres.includes(option))}
+        onSelect={onToggleGenre}
+        getLabel={genreLabel}
       />
       <YearSelect options={years} active={filters.year} onSelect={(value) => onChange('year', value)} />
       <div>
         <FilterGroup
           title="러닝타임"
           options={runtimeFilters}
-          active={filters.runtime}
+          isActive={(option) => filters.runtime === option}
           onSelect={(value) => onChange('runtime', value)}
         />
         {filters.runtime !== '전체' && (

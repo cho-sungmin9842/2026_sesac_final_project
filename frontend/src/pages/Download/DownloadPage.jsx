@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
+import { useAuth } from '../../auth/AuthContext'
 import { getFirstMatches } from '../../api/movieApi'
-import { addDownload, getDownloads, removeDownload } from '../../downloads/downloadsStorage'
+import { addDownload, getDownloads, removeDownload } from '../../api/downloadApi'
 import DownloadCard from './components/DownloadCard'
 import { CURATED_DOWNLOAD_TITLES } from './curatedDownloadTitles'
 
@@ -13,6 +14,7 @@ function estimateSizeMb(movie) {
 }
 
 function DownloadPage() {
+  const { user } = useAuth()
   const [movies, setMovies] = useState([])
   const [status, setStatus] = useState('loading') // loading | ready | error
   const [downloads, setDownloads] = useState([])
@@ -20,11 +22,11 @@ function DownloadPage() {
 
   useEffect(() => {
     let cancelled = false
-    getFirstMatches(CURATED_DOWNLOAD_TITLES)
-      .then((results) => {
+    Promise.all([getFirstMatches(CURATED_DOWNLOAD_TITLES), getDownloads(user.id)])
+      .then(([results, downloadList]) => {
         if (cancelled) return
         setMovies(results)
-        setDownloads(getDownloads())
+        setDownloads(downloadList)
         setStatus('ready')
       })
       .catch(() => {
@@ -34,7 +36,7 @@ function DownloadPage() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [user.id])
 
   const handleDownload = (movie) => {
     setProgressById((prev) => ({ ...prev, [movie.id]: 0 }))
@@ -46,14 +48,12 @@ function DownloadPage() {
 
         if (next >= 100) {
           clearInterval(interval)
-          addDownload({
-            id: movie.id,
-            title: movie.title,
-            year: movie.year,
+          addDownload(user.id, {
+            movieId: movie.id,
+            movieTitle: movie.title,
             posterUrl: movie.posterUrl,
             sizeMb: estimateSizeMb(movie),
-          })
-          setDownloads(getDownloads())
+          }).then(() => getDownloads(user.id).then(setDownloads))
           const { [movie.id]: _removed, ...rest } = prev
           return rest
         }
@@ -64,8 +64,7 @@ function DownloadPage() {
   }
 
   const handleRemove = (movieId) => {
-    removeDownload(movieId)
-    setDownloads(getDownloads())
+    removeDownload(user.id, movieId).then(() => getDownloads(user.id).then(setDownloads))
   }
 
   const totalSizeMb = downloads.reduce((sum, item) => sum + (item.sizeMb ?? 0), 0)
@@ -91,7 +90,7 @@ function DownloadPage() {
               movie={movie}
               sizeMb={estimateSizeMb(movie)}
               progress={progressById[movie.id] ?? null}
-              isDownloaded={downloads.some((item) => item.id === movie.id)}
+              isDownloaded={downloads.some((item) => item.movieId === movie.id)}
               onDownload={() => handleDownload(movie)}
               onRemove={() => handleRemove(movie.id)}
             />

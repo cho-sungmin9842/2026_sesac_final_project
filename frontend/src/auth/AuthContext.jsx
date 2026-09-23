@@ -1,17 +1,11 @@
 import { createContext, useContext, useEffect, useState } from 'react'
+import * as authApi from '../api/authApi'
 
-// 백엔드 인증 서버가 아직 없어서, 로그인 상태를 로컬(브라우저)에만 저장하는 데모용 인증입니다.
-// 이메일이 "admin"으로 시작하면 관리자 계정으로 취급합니다(목업 1번 화면 설명과 동일한 규칙).
+// 로그인 상태 자체는 여전히 브라우저(localStorage)에만 남겨두는 데모 수준 세션입니다.
+// 다만 회원가입/로그인은 이제 MySQL에 저장된 실제 계정으로 검증되고, 응답으로 받은 user.id가
+// 리뷰/예매/다운로드 API 호출 시 "누가 요청했는지"를 알려주는 X-User-Id 헤더로 쓰입니다.
 const AuthContext = createContext(null)
 const STORAGE_KEY = 'moviepick_auth_user'
-
-function buildUser(nickname, email) {
-  return {
-    email,
-    nickname: nickname || email.split('@')[0],
-    isAdmin: email.trim().toLowerCase().startsWith('admin'),
-  }
-}
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(() => {
@@ -27,21 +21,29 @@ export function AuthProvider({ children }) {
     }
   }, [user])
 
-  const login = (email) => {
-    const nextUser = buildUser(null, email)
+  const login = async (username, password) => {
+    const nextUser = await authApi.login({ username, password })
     setUser(nextUser)
     return nextUser
   }
 
-  const signup = (nickname, email) => {
-    const nextUser = buildUser(nickname, email)
+  const signup = async (nickname, username, password) => {
+    const nextUser = await authApi.signup({ nickname, username, password })
+    setUser(nextUser)
+    return nextUser
+  }
+
+  const loginSocial = async (provider) => {
+    const nextUser = await authApi.socialLogin(provider)
     setUser(nextUser)
     return nextUser
   }
 
   const logout = () => setUser(null)
 
-  return <AuthContext.Provider value={{ user, login, signup, logout }}>{children}</AuthContext.Provider>
+  return (
+    <AuthContext.Provider value={{ user, login, signup, loginSocial, logout }}>{children}</AuthContext.Provider>
+  )
 }
 
 export function useAuth() {

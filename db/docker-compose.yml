@@ -1,0 +1,29 @@
+# 로컬 개발용 MySQL 실행 파일입니다.
+# 사용법: 이 db 폴더에서 `docker compose up -d` 실행 → schema.sql이 최초 1회 자동 적용됩니다.
+# (schema.sql은 볼륨이 비어있을 때만 실행되므로, 스키마를 고치면 아래 볼륨을 지우고 다시 올려야 반영됩니다:
+#  docker compose down -v && docker compose up -d)
+# 백엔드 backend/src/main/resources/application.yml의 datasource 설정과 계정/비밀번호가 맞춰져 있습니다.
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: moviepick-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: moviepick
+      MYSQL_USER: moviepick
+      MYSQL_PASSWORD: moviepick1234
+      MYSQL_ROOT_PASSWORD: moviepick_root_1234
+    ports:
+      - "3306:3306"
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    volumes:
+      - moviepick-mysql-data:/var/lib/mysql
+      - ./schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-pmoviepick_root_1234"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  moviepick-mysql-data:

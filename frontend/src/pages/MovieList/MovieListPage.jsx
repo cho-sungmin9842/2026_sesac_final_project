@@ -5,24 +5,20 @@ import { searchMovies } from '../../api/movieApi'
 import FilterSidebar from './components/FilterSidebar'
 import Pagination from './components/Pagination'
 
-const PAGE_SIZE = 20
+const PAGE_SIZE = 15
 const RUNTIME_LIMIT_MINUTES = 120
-
-// KMDB 검색 API에는 정렬 파라미터가 없어서, 현재 페이지에 불러온 결과만 화면에서 정렬합니다.
-const SORTERS = {
-  latest: (a, b) => (b.year ?? 0) - (a.year ?? 0),
-  name: (a, b) => a.title.localeCompare(b.title, 'ko'),
-}
 
 function MovieListPage() {
   const [searchParams] = useSearchParams()
   const query = searchParams.get('query') ?? ''
 
-  const [filters, setFilters] = useState({
-    genre: '전체',
+  // 홈 화면 "취향저격 신작"의 "전체보기"처럼 ?genre=코미디&genre=액션 형태로 여러 장르를 넘겨받으면
+  // 사이드바가 처음부터 그 장르들을 선택된 상태로 보여줍니다.
+  const [filters, setFilters] = useState(() => ({
+    genres: searchParams.getAll('genre'),
     year: '전체',
     runtime: '전체',
-  })
+  }))
 
   const [sort, setSort] = useState('latest')
   const [page, setPage] = useState(1)
@@ -34,18 +30,27 @@ function MovieListPage() {
     setFilters((prev) => ({ ...prev, [key]: value }))
   }
 
-  // 검색어나 장르/연도가 바뀌면 1페이지부터 다시 봅니다.
+  const handleToggleGenre = (genre) => {
+    setFilters((prev) => {
+      if (genre === '전체') return { ...prev, genres: [] }
+      const isSelected = prev.genres.includes(genre)
+      return { ...prev, genres: isSelected ? prev.genres.filter((g) => g !== genre) : [...prev.genres, genre] }
+    })
+  }
+
+  // 검색어/장르/연도/정렬이 바뀌면 1페이지부터 다시 봅니다.
   useEffect(() => {
     setPage(1)
-  }, [query, filters.genre, filters.year])
+  }, [query, filters.genres, filters.year, sort])
 
   useEffect(() => {
     let cancelled = false
     setStatus('loading')
 
     searchMovies(query, {
-      genre: filters.genre === '전체' ? undefined : filters.genre,
+      genre: filters.genres,
       year: filters.year === '전체' ? undefined : filters.year,
+      sort,
       page,
       pageSize: PAGE_SIZE,
     })
@@ -63,28 +68,29 @@ function MovieListPage() {
     return () => {
       cancelled = true
     }
-  }, [query, filters.genre, filters.year, page])
+  }, [query, filters.genres, filters.year, sort, page])
 
-  // 러닝타임/정렬 모두 KMDB 검색 API에 해당 파라미터가 없어 현재 페이지 결과 안에서만 처리합니다.
+  // 정렬(최신순/이름순)은 이제 백엔드가 카탈로그 전체 기준으로 미리 정렬해서 내려줍니다.
+  // 러닝타임만 KMDB 검색 API에 해당 파라미터가 없어 현재 페이지 결과 안에서 클라이언트 필터링합니다.
   const visibleMovies = useMemo(() => {
-    let filtered = result.movies
     if (filters.runtime === '2시간 미만') {
-      filtered = result.movies.filter(
+      return result.movies.filter(
         (movie) => movie.runtimeMinutes != null && movie.runtimeMinutes < RUNTIME_LIMIT_MINUTES,
       )
-    } else if (filters.runtime === '2시간 이상') {
-      filtered = result.movies.filter(
+    }
+    if (filters.runtime === '2시간 이상') {
+      return result.movies.filter(
         (movie) => movie.runtimeMinutes != null && movie.runtimeMinutes >= RUNTIME_LIMIT_MINUTES,
       )
     }
-    return [...filtered].sort(SORTERS[sort])
-  }, [result.movies, filters.runtime, sort])
+    return result.movies
+  }, [result.movies, filters.runtime])
 
   const heading = query ? `"${query}" 검색 결과` : '전체 영화'
 
   return (
     <div className="mx-auto flex max-w-7xl gap-8 px-6 py-6">
-      <FilterSidebar filters={filters} onChange={handleFilterChange} />
+      <FilterSidebar filters={filters} onChange={handleFilterChange} onToggleGenre={handleToggleGenre} />
 
       <section className="flex-1">
         <div className="mb-4 flex items-center justify-between">

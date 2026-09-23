@@ -18,7 +18,7 @@ function AuthShell({ mode, tagline, children }) {
             <span className="flex h-9 w-9 items-center justify-center rounded-md bg-gradient-to-br from-indigo-500 to-purple-500">
               🎬
             </span>
-            MOVIEPICK
+            SESAC MOVIE
           </div>
           <p className="max-w-xs text-lg font-semibold text-white">{tagline}</p>
           <ul className="mt-6 space-y-2 text-sm text-gray-300">

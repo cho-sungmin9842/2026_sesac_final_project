@@ -17,6 +17,8 @@ public class WebConfig implements WebMvcConfigurer {
     public void addCorsMappings(CorsRegistry registry) {
         registry.addMapping("/api/**")
                 .allowedOrigins(appProperties.allowedOrigins().toArray(new String[0]))
-                .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS");
+                .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
+                // 로그인한 사용자를 식별하는 X-User-Id 커스텀 헤더를 프리플라이트에서 허용해야 합니다.
+                .allowedHeaders("Content-Type", "X-User-Id");
     }
 }

@@ -1,3 +1,5 @@
+import PosterPlaceholder from '../../../components/common/PosterPlaceholder'
+
 function formatSize(sizeMb) {
   return sizeMb >= 1024 ? `${(sizeMb / 1024).toFixed(1)}GB` : `${sizeMb}MB`
 }
@@ -7,9 +9,11 @@ function DownloadCard({ movie, sizeMb, progress, isDownloaded, onDownload, onRem
 
   return (
     <div className="flex items-center gap-4 rounded-lg bg-slate-900 p-4">
-      <div className="h-20 w-14 shrink-0 overflow-hidden rounded-md bg-slate-800">
-        {movie.posterUrl && (
+      <div className="h-20 w-14 shrink-0 overflow-hidden rounded-md">
+        {movie.posterUrl ? (
           <img src={movie.posterUrl} alt={movie.title} className="h-full w-full object-cover" />
+        ) : (
+          <PosterPlaceholder compact />
         )}
       </div>
 

@@ -1,3 +1,5 @@
+import PosterPlaceholder from '../../../components/common/PosterPlaceholder'
+
 const VIDEO_LABEL = {
   trailer: '▶ 예고편 보기',
   making: '🎬 메이킹 필름 보기',
@@ -7,7 +9,7 @@ function PosterImage({ posterUrl, title }) {
   return posterUrl ? (
     <img src={posterUrl} alt={title} className="h-full w-full object-cover" />
   ) : (
-    <div className="h-full w-full bg-gradient-to-br from-slate-700 to-slate-900" />
+    <PosterPlaceholder />
   )
 }
 
