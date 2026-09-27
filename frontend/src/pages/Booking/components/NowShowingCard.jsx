@@ -13,16 +13,18 @@ function NowShowingCard({ movie }) {
           ) : (
             <PosterPlaceholder />
           )}
-          <span className="absolute top-2 left-2 max-w-[65%] rounded-md bg-black/60 px-2 py-1 text-[11px] font-semibold leading-tight text-gray-200">
-            {movie.ageRating ?? '정보 없음'}
-          </span>
-          <span
-            className={`absolute top-2 right-2 flex items-center gap-1 rounded-md bg-black/60 px-2 py-1 text-xs font-semibold ${
-              movie.averageScore != null ? 'text-amber-400' : 'text-gray-400'
-            }`}
-          >
-            {movie.averageScore != null ? `★ ${movie.averageScore.toFixed(1)}` : '정보 없음'}
-          </span>
+          <div className="absolute inset-x-2 top-2 flex items-start justify-between gap-1">
+            <span className="max-w-[60%] rounded-md bg-black/60 px-2 py-1 text-[11px] font-semibold leading-tight text-gray-200">
+              {movie.ageRating ?? '정보 없음'}
+            </span>
+            <span
+              className={`flex shrink-0 items-center gap-1 rounded-md bg-black/60 px-2 py-1 text-xs font-semibold ${
+                movie.averageScore != null ? 'text-amber-400' : 'text-gray-400'
+              }`}
+            >
+              {movie.averageScore != null ? `★ ${movie.averageScore.toFixed(1)}` : '정보 없음'}
+            </span>
+          </div>
         </div>
       </Link>
       <div className="p-3">

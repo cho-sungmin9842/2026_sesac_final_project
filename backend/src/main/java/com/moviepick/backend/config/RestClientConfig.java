@@ -13,4 +13,11 @@ public class RestClientConfig {
                 .baseUrl(kmdbProperties.baseUrl())
                 .build();
     }
+
+    @Bean
+    public RestClient geminiRestClient(GeminiProperties geminiProperties) {
+        return RestClient.builder()
+                .baseUrl(geminiProperties.baseUrl())
+                .build();
+    }
 }

@@ -30,6 +30,9 @@ public class KmdbClient {
 
     private static final String COLLECTION = "kmdb_new2";
     private static final int RESPONSE_PREVIEW_LENGTH = 300;
+    // 해외 영화는 서비스에서 다루지 않으므로, KMDB가 지원하는 nation 파라미터(부분일치, 공동제작도
+    // "대한민국"이 포함되어 있으면 걸림)로 검색 단계에서부터 국내 영화만 받아옵니다.
+    private static final String DOMESTIC_NATION = "대한민국";
 
     private final RestClient kmdbRestClient;
     private final KmdbProperties kmdbProperties;
@@ -42,23 +45,31 @@ public class KmdbClient {
     }
 
     public KmdbSearchResponse searchByTitle(
-            String title, String genre, String releaseDts, String releaseDte, int listCount, int startCount
+            String title, String genre, String releaseDts, String releaseDte, int listCount, int startCount, String sort
     ) {
-        return searchByField("title", title, genre, releaseDts, releaseDte, listCount, startCount);
+        return searchByField("title", title, genre, releaseDts, releaseDte, listCount, startCount, sort);
     }
 
     // 검색창이 "영화, 배우, 감독 검색"이라 안내하고 있어서, 배우/감독 이름으로도 찾을 수 있어야 합니다.
     // actor/director는 2026-09-21에 실제 키로 검증된 파라미터입니다(예: actor=마동석, director=봉준호).
     public KmdbSearchResponse searchByActor(
-            String actor, String genre, String releaseDts, String releaseDte, int listCount, int startCount
+            String actor, String genre, String releaseDts, String releaseDte, int listCount, int startCount, String sort
     ) {
-        return searchByField("actor", actor, genre, releaseDts, releaseDte, listCount, startCount);
+        return searchByField("actor", actor, genre, releaseDts, releaseDte, listCount, startCount, sort);
     }
 
     public KmdbSearchResponse searchByDirector(
-            String director, String genre, String releaseDts, String releaseDte, int listCount, int startCount
+            String director, String genre, String releaseDts, String releaseDte, int listCount, int startCount, String sort
     ) {
-        return searchByField("director", director, genre, releaseDts, releaseDte, listCount, startCount);
+        return searchByField("director", director, genre, releaseDts, releaseDte, listCount, startCount, sort);
+    }
+
+    // 제목/배우/감독 어디에도 안 걸리는 "좀비", "시간여행" 같은 소재·테마 검색용. KMDB가 영화별로 태깅해둔
+    // keywords 필드를 대상으로 찾아줍니다(2026-09-25에 실제 키로 확인: keyword=좀비 -> 킹덤, #살아있다 등).
+    public KmdbSearchResponse searchByKeyword(
+            String keyword, String genre, String releaseDts, String releaseDte, int listCount, int startCount, String sort
+    ) {
+        return searchByField("keyword", keyword, genre, releaseDts, releaseDte, listCount, startCount, sort);
     }
 
     private KmdbSearchResponse searchByField(
@@ -68,17 +79,25 @@ public class KmdbClient {
             String releaseDts,
             String releaseDte,
             int listCount,
-            int startCount
+            int startCount,
+            String sort
     ) {
         return call(uriBuilder -> {
+            // 기본 골격은 collection/ServiceKey/detail/startCount/listCount/nation/sort 순으로 고정하고,
+            // 그 위에 이번 조회가 실제로 쓰는 필터(제목·배우·감독, 장르, 개봉일자)만 덧붙입니다.
             uriBuilder.queryParam("collection", COLLECTION)
                     .queryParam("ServiceKey", kmdbProperties.serviceKey())
                     .queryParam("detail", "Y")
-                    .queryParam(fieldName, fieldValue)
+                    .queryParam("startCount", startCount)
                     .queryParam("listCount", listCount)
-                    .queryParam("startCount", startCount);
+                    .queryParam("nation", DOMESTIC_NATION);
+            // 정렬(최신순 -> prodYear,1 / 이름순 -> title,1)도 KMDB가 직접 지원하는 파라미터입니다.
+            if (sort != null && !sort.isBlank()) {
+                uriBuilder.queryParam("sort", sort);
+            }
+            uriBuilder.queryParam(fieldName, fieldValue);
             if (genre != null && !genre.isBlank()) {
-                uriBuilder.queryParam("genre", genre);
+                uriBuilder.queryParam("genre", toKmdbGenreParam(genre));
             }
             if (releaseDts != null && !releaseDts.isBlank()) {
                 uriBuilder.queryParam("releaseDts", releaseDts);
@@ -88,6 +107,14 @@ public class KmdbClient {
             }
             return uriBuilder.build();
         });
+    }
+
+    // "멜로/로맨스"처럼 "/"가 낀 장르명을 그대로 넘기면 KMDB가 0건으로 매칭에 실패합니다("/" 앞부분만
+    // 보내도 전체 조합과 정확히 같은 결과가 나오는 걸 확인했습니다). 프론트(movieApi.js)에서도 같은 이유로
+    // 앞부분만 잘라 보내지만, 이 채팅 기능처럼 백엔드가 직접 genre를 넘기는 경로도 있어 여기서 한 번 더 방어합니다.
+    private String toKmdbGenreParam(String genre) {
+        int slashIndex = genre.indexOf('/');
+        return slashIndex == -1 ? genre : genre.substring(0, slashIndex);
     }
 
     public KmdbSearchResponse findByMovieId(String movieId, String movieSeq) {

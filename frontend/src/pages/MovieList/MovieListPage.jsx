@@ -4,13 +4,19 @@ import MovieCard from '../../components/common/MovieCard'
 import { searchMovies } from '../../api/movieApi'
 import FilterSidebar from './components/FilterSidebar'
 import Pagination from './components/Pagination'
+import SortDropdown from './components/SortDropdown'
 
 const PAGE_SIZE = 15
 const RUNTIME_LIMIT_MINUTES = 120
+const SORT_OPTIONS = [
+  { value: 'latest', label: '최신순' },
+  { value: 'name', label: '이름순' },
+]
 
 function MovieListPage() {
   const [searchParams] = useSearchParams()
   const query = searchParams.get('query') ?? ''
+  const field = searchParams.get('field') ?? 'title'
 
   // 홈 화면 "취향저격 신작"의 "전체보기"처럼 ?genre=코미디&genre=액션 형태로 여러 장르를 넘겨받으면
   // 사이드바가 처음부터 그 장르들을 선택된 상태로 보여줍니다.
@@ -38,10 +44,10 @@ function MovieListPage() {
     })
   }
 
-  // 검색어/장르/연도/정렬이 바뀌면 1페이지부터 다시 봅니다.
+  // 검색어/검색대상/장르/연도/정렬이 바뀌면 1페이지부터 다시 봅니다.
   useEffect(() => {
     setPage(1)
-  }, [query, filters.genres, filters.year, sort])
+  }, [query, field, filters.genres, filters.year, sort])
 
   useEffect(() => {
     let cancelled = false
@@ -53,6 +59,7 @@ function MovieListPage() {
       sort,
       page,
       pageSize: PAGE_SIZE,
+      field,
     })
       .then((data) => {
         if (cancelled) return
@@ -68,7 +75,7 @@ function MovieListPage() {
     return () => {
       cancelled = true
     }
-  }, [query, filters.genres, filters.year, sort, page])
+  }, [query, field, filters.genres, filters.year, sort, page])
 
   // 정렬(최신순/이름순)은 이제 백엔드가 카탈로그 전체 기준으로 미리 정렬해서 내려줍니다.
   // 러닝타임만 KMDB 검색 API에 해당 파라미터가 없어 현재 페이지 결과 안에서 클라이언트 필터링합니다.
@@ -98,14 +105,7 @@ function MovieListPage() {
             {heading}
             {status === 'success' && <span className="text-gray-400"> {result.totalCount.toLocaleString()}건</span>}
           </h2>
-          <select
-            value={sort}
-            onChange={(event) => setSort(event.target.value)}
-            className="rounded-md bg-slate-800 px-3 py-1.5 text-sm text-gray-300"
-          >
-            <option value="latest">최신순</option>
-            <option value="name">이름순</option>
-          </select>
+          <SortDropdown value={sort} options={SORT_OPTIONS} onChange={setSort} />
         </div>
 
         {status === 'loading' && <p className="text-gray-400">KMDB에서 불러오는 중...</p>}

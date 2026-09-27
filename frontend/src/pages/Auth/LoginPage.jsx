@@ -3,14 +3,8 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../auth/AuthContext'
 import AuthShell from './components/AuthShell'
 
-const SOCIAL_BUTTONS = [
-  { key: 'kakao', label: '카카오', dot: '●', className: 'border-transparent bg-[#FEE500] text-slate-900' },
-  { key: 'naver', label: '네이버', dot: '●', className: 'border-transparent bg-[#03C75A] text-white' },
-  { key: 'google', label: '구글', dot: '●', className: 'border-slate-300 bg-white text-slate-700' },
-]
-
 function LoginPage() {
-  const { login, loginSocial } = useAuth()
+  const { login } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
   const [username, setUsername] = useState('')
@@ -31,15 +25,6 @@ function LoginPage() {
     setError('')
     try {
       goAfterLogin(await login(username, password))
-    } catch (err) {
-      setError(err.message)
-    }
-  }
-
-  const handleSocialLogin = async (provider) => {
-    setError('')
-    try {
-      goAfterLogin(await loginSocial(provider))
     } catch (err) {
       setError(err.message)
     }
@@ -96,25 +81,6 @@ function LoginPage() {
         >
           로그인
         </button>
-
-        <div className="flex items-center gap-3 text-xs text-slate-400">
-          <span className="h-px flex-1 bg-slate-200" />
-          간편 로그인
-          <span className="h-px flex-1 bg-slate-200" />
-        </div>
-
-        <div className="grid grid-cols-3 gap-2">
-          {SOCIAL_BUTTONS.map((social) => (
-            <button
-              key={social.key}
-              type="button"
-              onClick={() => handleSocialLogin(social.key)}
-              className={`rounded-lg border px-2 py-2 text-xs font-semibold ${social.className}`}
-            >
-              {social.label}
-            </button>
-          ))}
-        </div>
 
         <p className="pt-2 text-center text-xs text-slate-500">
           관리자 계정으로 로그인하면 자동으로 관리자 대시보드로 이동합니다.

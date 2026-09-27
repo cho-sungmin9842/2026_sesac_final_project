@@ -12,14 +12,12 @@ import org.springframework.stereotype.Service;
 import java.time.LocalDate;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
 
 @Service
 public class BookingService {
-
-    // 목업 화면 그대로 좌석당 가격을 고정값으로 둡니다(상영관/시간대별 가격 정책은 범위 밖).
-    private static final int PRICE_PER_SEAT = 12000;
 
     private final BookingRepository bookingRepository;
     private final UserRepository userRepository;
@@ -53,6 +51,8 @@ public class BookingService {
             throw new ApiException("이미 예약된 좌석입니다: " + String.join(", ", conflicting), HttpStatus.CONFLICT);
         }
 
+        int totalPrice = calculateTotalPrice(request.ticketCounts(), requestedSeats.size(), request.showDate());
+
         Booking booking = new Booking(
                 user,
                 request.movieId(),
@@ -61,9 +61,32 @@ public class BookingService {
                 request.showDate(),
                 request.showtime(),
                 requestedSeats,
-                requestedSeats.size() * PRICE_PER_SEAT
+                totalPrice
         );
         return BookingDto.from(bookingRepository.save(booking));
+    }
+
+    // 요금은 클라이언트가 보낸 가격이 아니라, 연령 구분별 인원 수 × showDate 기준(주중/주말·공휴일) 요금표로
+    // 서버가 직접 계산합니다. 인원 수 합은 좌석 수와 반드시 같아야 합니다(자리마다 한 명씩).
+    private int calculateTotalPrice(Map<String, Integer> ticketCounts, int seatCount, LocalDate showDate) {
+        int totalTickets = 0;
+        int totalPrice = 0;
+        for (Map.Entry<String, Integer> entry : ticketCounts.entrySet()) {
+            String category = entry.getKey();
+            int count = entry.getValue() == null ? 0 : entry.getValue();
+            if (count < 0) {
+                throw new ApiException("인원 수는 0 이상이어야 합니다.", HttpStatus.BAD_REQUEST);
+            }
+            if (count > 0 && !TicketPricing.isKnownCategory(category)) {
+                throw new ApiException("알 수 없는 인원 구분입니다: " + category, HttpStatus.BAD_REQUEST);
+            }
+            totalTickets += count;
+            totalPrice += count * TicketPricing.priceFor(category, showDate);
+        }
+        if (totalTickets != seatCount) {
+            throw new ApiException("선택한 인원 수와 좌석 수가 일치하지 않습니다.", HttpStatus.BAD_REQUEST);
+        }
+        return totalPrice;
     }
 
     private List<Booking> findBookings(String movieId, String theater, LocalDate showDate, String showtime) {

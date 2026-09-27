@@ -19,6 +19,12 @@ CREATE TABLE IF NOT EXISTS users (
     CONSTRAINT uq_users_username UNIQUE (username)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
 
+-- 기본 관리자 계정(아이디=admin, 비밀번호=admin1234). password_hash는 BCryptPasswordEncoder로 미리 해시해둔
+-- 값이라 앱을 거치지 않고도 이 스키마만으로 계정이 만들어집니다. 이미 있으면(같은 username) 건너뛰므로
+-- DB를 새로 만들 때나 이 스크립트를 다시 실행할 때나 항상 존재하고, 로그인 후 바뀐 비밀번호를 덮어쓰지 않습니다.
+INSERT IGNORE INTO users (username, password_hash, nickname, is_admin)
+VALUES ('admin', '$2a$10$rBUBitlzXedMq2u2Xpofx.zygLzu7lw5unS0UBRuK9CMw/EOJ0AbG', 'Admin', TRUE);
+
 -- 마이페이지 "선호 장르" 설정 - 목록 화면의 genre 필터와 같은 문자열을 저장합니다(JPA @ElementCollection 매핑).
 CREATE TABLE IF NOT EXISTS user_preferred_genres (
     user_id BIGINT      NOT NULL,
@@ -100,4 +106,18 @@ CREATE TABLE IF NOT EXISTS watched_movies (
     watched_at  DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_watched_movies_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
     CONSTRAINT uq_watched_movies_user_movie UNIQUE (user_id, movie_id)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
+
+-- AI 추천 채팅 내역. movie_ids는 그 메시지가 추천한 영화들의 합성 id("{movieId}_{movieSeq}")를 콤마로 이어붙인
+-- 값으로, 화면 재방문 시 KMDB에서 다시 상세를 조회해 추천 카드를 그대로 복원하는 데 씁니다(추천이 아닌
+-- 일반 텍스트 메시지는 NULL).
+CREATE TABLE IF NOT EXISTS chat_messages (
+    id         BIGINT AUTO_INCREMENT PRIMARY KEY,
+    user_id    BIGINT      NOT NULL,
+    role       VARCHAR(10) NOT NULL,
+    content    TEXT        NOT NULL,
+    movie_ids  VARCHAR(500) NULL,
+    created_at DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_chat_messages_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
+    INDEX idx_chat_messages_user_id (user_id, created_at)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;

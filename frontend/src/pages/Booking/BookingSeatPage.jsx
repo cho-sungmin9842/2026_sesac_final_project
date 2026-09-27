@@ -5,7 +5,7 @@ import { getMovieDetail } from '../../api/movieApi'
 import { createBooking, getReservedSeats } from '../../api/bookingApi'
 import PosterPlaceholder from '../../components/common/PosterPlaceholder'
 import SeatMap from './components/SeatMap'
-import { PRICE_PER_SEAT, SHOWTIMES, THEATERS, getBookingDates } from './bookingData'
+import { AGE_CATEGORIES, SHOWTIMES, THEATERS, getBookingDates, isWeekendOrHoliday, priceFor } from './bookingData'
 
 const DATES = getBookingDates()
 
@@ -33,6 +33,7 @@ function BookingSeatPage() {
   const [showtime, setShowtime] = useState(SHOWTIMES[0])
   const [selectedSeats, setSelectedSeats] = useState([])
   const [reservedSeats, setReservedSeats] = useState(new Set())
+  const [ticketCounts, setTicketCounts] = useState({ adult: 0, teen: 0, child: 0, senior: 0 })
 
   useEffect(() => {
     let cancelled = false
@@ -73,10 +74,21 @@ function BookingSeatPage() {
     )
   }
 
-  const totalPrice = selectedSeats.length * PRICE_PER_SEAT
+  const updateTicketCount = (key, delta) => {
+    setTicketCounts((prev) => ({ ...prev, [key]: Math.max(0, prev[key] + delta) }))
+  }
+
+  const holidayPricing = isWeekendOrHoliday(showDate)
+  const totalTickets = Object.values(ticketCounts).reduce((sum, count) => sum + count, 0)
+  const totalPrice = AGE_CATEGORIES.reduce(
+    (sum, category) => sum + ticketCounts[category.key] * priceFor(category.key, showDate),
+    0,
+  )
+  // 좌석은 인원수만큼 정확히 골라야 결제할 수 있습니다(누가 어느 좌석인지까지는 구분하지 않습니다).
+  const seatsMatchTickets = totalTickets > 0 && selectedSeats.length === totalTickets
 
   const handlePayment = async () => {
-    if (selectedSeats.length === 0) return
+    if (!seatsMatchTickets) return
     try {
       await createBooking(user.id, {
         movieId: id,
@@ -85,9 +97,11 @@ function BookingSeatPage() {
         showDate,
         showtime,
         seats: selectedSeats,
+        ticketCounts,
       })
       window.alert(`${selectedSeats.length}석 (${totalPrice.toLocaleString()}원) 결제가 완료되었습니다.`)
       setSelectedSeats([])
+      setTicketCounts({ adult: 0, teen: 0, child: 0, senior: 0 })
       refreshReservedSeats()
     } catch (error) {
       window.alert(error.message)
@@ -118,7 +132,7 @@ function BookingSeatPage() {
               <div>
                 <h1 className="text-xl font-bold">{movie.title}</h1>
                 <p className="mt-1 text-sm text-gray-500">
-                  무비픽시네마 {theater} · 2관 · {movie.runtimeMinutes}분 · {movie.ageRating}
+                  새싹시네마 · 2관 · {movie.runtimeMinutes}분 · {movie.ageRating}
                 </p>
               </div>
             </div>
@@ -158,25 +172,84 @@ function BookingSeatPage() {
               </div>
             </div>
 
+            <div className="border-b border-gray-200 py-6">
+              <div className="mb-3 flex items-center gap-2">
+                <h2 className="text-sm font-semibold text-gray-500">인원 선택</h2>
+                <span
+                  className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
+                    holidayPricing ? 'bg-rose-100 text-rose-600' : 'bg-indigo-100 text-indigo-600'
+                  }`}
+                >
+                  {holidayPricing ? '주말·공휴일 요금' : '주중 요금'}
+                </span>
+              </div>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                {AGE_CATEGORIES.map((category) => (
+                  <div
+                    key={category.key}
+                    className="flex items-center justify-between rounded-lg border border-gray-200 px-4 py-3"
+                  >
+                    <div>
+                      <p className="text-sm font-semibold text-gray-900">{category.label}</p>
+                      <p className="text-xs text-gray-500">{category.sublabel}</p>
+                      <p className="mt-0.5 text-xs text-gray-500">
+                        {priceFor(category.key, showDate).toLocaleString()}원
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={() => updateTicketCount(category.key, -1)}
+                        className="flex h-7 w-7 items-center justify-center rounded-full bg-gray-100 text-gray-700 hover:bg-gray-200"
+                      >
+                        -
+                      </button>
+                      <span className="w-4 text-center text-sm font-semibold">{ticketCounts[category.key]}</span>
+                      <button
+                        type="button"
+                        onClick={() => updateTicketCount(category.key, 1)}
+                        className="flex h-7 w-7 items-center justify-center rounded-full bg-gray-100 text-gray-700 hover:bg-gray-200"
+                      >
+                        +
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {totalTickets > 0 && (
+                <p className="mt-3 text-xs text-gray-500">
+                  총 {totalTickets}명 · 좌석을 {totalTickets}석 선택해주세요.
+                </p>
+              )}
+            </div>
+
             <div className="py-8">
               <SeatMap reservedSeats={reservedSeats} selectedSeats={selectedSeats} onToggleSeat={toggleSeat} />
             </div>
 
             <div className="flex items-center justify-between border-t border-gray-200 pt-6">
-              <p className="text-sm text-gray-600">
-                선택 좌석:{' '}
-                {selectedSeats.length > 0 ? (
-                  <span className="font-semibold text-indigo-600">
-                    {selectedSeats.join(', ')} ({selectedSeats.length}석)
-                  </span>
-                ) : (
-                  '없음'
+              <div>
+                <p className="text-sm text-gray-600">
+                  선택 좌석:{' '}
+                  {selectedSeats.length > 0 ? (
+                    <span className="font-semibold text-indigo-600">
+                      {selectedSeats.join(', ')} ({selectedSeats.length}석)
+                    </span>
+                  ) : (
+                    '없음'
+                  )}
+                </p>
+                {totalTickets === 0 && <p className="mt-1 text-xs text-rose-500">인원을 먼저 선택해주세요.</p>}
+                {totalTickets > 0 && !seatsMatchTickets && (
+                  <p className="mt-1 text-xs text-rose-500">
+                    선택한 인원({totalTickets}명)만큼 좌석을 선택해주세요.
+                  </p>
                 )}
-              </p>
+              </div>
               <p className="text-xl font-bold">{totalPrice.toLocaleString()}원</p>
               <button
                 type="button"
-                disabled={selectedSeats.length === 0}
+                disabled={!seatsMatchTickets}
                 onClick={handlePayment}
                 className="rounded-lg bg-indigo-600 px-6 py-3 text-sm font-semibold text-white hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-gray-300"
               >

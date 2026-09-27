@@ -6,8 +6,10 @@ import { addReview, deleteReview, getReviews, updateReview } from '../../api/rev
 import { addWishlist, isWishlisted, removeWishlist } from '../../api/wishlistApi'
 import { addWatched, isWatched, removeWatched } from '../../api/watchedApi'
 import AiSummaryBox from './components/AiSummaryBox'
+import OtherVideoButtons from './components/OtherVideoButtons'
 import PosterLink from './components/PosterLink'
 import ReviewList from './components/ReviewList'
+import StillGallery from './components/StillGallery'
 import WriteReviewDialog from './components/WriteReviewDialog'
 import { normalizeDetail } from './normalizeDetail'
 
@@ -127,7 +129,7 @@ function MovieDetailPage() {
   return (
     <div className="mx-auto max-w-6xl px-6 py-6">
       <div className="flex gap-6">
-        <PosterLink posterUrl={detail.posterUrl} video={detail.video} title={detail.title} />
+        <PosterLink posterUrls={detail.posterUrls} video={detail.video} title={detail.title} />
 
         <div className="flex-1">
           <h1 className="flex items-baseline gap-2 text-2xl font-bold text-white">
@@ -152,25 +154,24 @@ function MovieDetailPage() {
           )}
 
           <div className="mt-3 flex flex-wrap gap-2">
-            {detail.tags.map((tag) => (
-              <span
-                key={tag}
-                className="rounded-full bg-indigo-500/10 px-3 py-1 text-xs font-medium text-indigo-300"
-              >
-                #{tag}
-              </span>
-            ))}
+            {detail.tags.length > 0 ? (
+              detail.tags.map((tag) => (
+                <span
+                  key={tag}
+                  className="rounded-full bg-indigo-500/10 px-3 py-1 text-xs font-medium text-indigo-300"
+                >
+                  #{tag}
+                </span>
+              ))
+            ) : (
+              <span className="text-sm text-gray-500">관련 키워드 없음</span>
+            )}
           </div>
 
           <p className="mt-4 max-w-2xl text-sm leading-relaxed text-gray-300">{detail.plot}</p>
 
           <div className="mt-5 flex gap-3">
-            <button
-              type="button"
-              className="rounded-lg bg-indigo-500/10 px-4 py-2 text-sm font-semibold text-indigo-300 hover:bg-indigo-500/20"
-            >
-              ✨ AI 줄거리 요약 (스포방지)
-            </button>
+            <AiSummaryBox movieId={id} movieTitle={detail.title} />
             <button
               type="button"
               onClick={handleToggleWishlist}
@@ -194,8 +195,12 @@ function MovieDetailPage() {
               {watched ? '✓ 시청완료' : '시청완료 표시'}
             </button>
           </div>
+
+          <OtherVideoButtons videos={detail.otherVideos} />
         </div>
       </div>
+
+      <StillGallery stillUrls={detail.stillUrls} />
 
       <div className="mt-10 flex gap-8">
         <section className="flex-1">
@@ -220,8 +225,6 @@ function MovieDetailPage() {
             <p className="text-sm text-gray-500">아직 등록된 리뷰가 없습니다.</p>
           )}
         </section>
-
-        {detail.aiSummary && <AiSummaryBox summary={detail.aiSummary} />}
       </div>
 
       {isDialogOpen && (

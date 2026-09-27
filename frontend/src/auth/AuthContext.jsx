@@ -33,16 +33,10 @@ export function AuthProvider({ children }) {
     return nextUser
   }
 
-  const loginSocial = async (provider) => {
-    const nextUser = await authApi.socialLogin(provider)
-    setUser(nextUser)
-    return nextUser
-  }
-
   const logout = () => setUser(null)
 
   return (
-    <AuthContext.Provider value={{ user, login, signup, loginSocial, logout }}>{children}</AuthContext.Provider>
+    <AuthContext.Provider value={{ user, login, signup, logout }}>{children}</AuthContext.Provider>
   )
 }
 

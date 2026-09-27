@@ -6,11 +6,11 @@ const ADMIN_LINKS = [
   { to: '/admin/reports', label: '리뷰 신고 관리', icon: '🚩' },
   { to: '/admin/members', label: '회원 관리', icon: '👤' },
   { to: '/admin/tmdb-sync', label: 'TMDB 동기화', icon: '🎞️' },
-  { to: '/admin/screenings', label: '예매/상영관 (확장)', icon: '🎟️' },
+  { to: '/admin/screenings', label: '예매/상영관', icon: '🎟️' },
 ]
 
 function AdminSidebar() {
-  const { user, logout } = useAuth()
+  const { logout } = useAuth()
   const navigate = useNavigate()
 
   const handleLogout = () => {
@@ -46,7 +46,7 @@ function AdminSidebar() {
       </nav>
 
       <div className="border-t border-white/5 px-2 pt-4 text-sm text-gray-400">
-        <p className="mb-2 truncate">{user?.username}</p>
+        <p className="mb-2 truncate">관리자</p>
         <button type="button" onClick={handleLogout} className="text-xs hover:text-white">
           로그아웃
         </button>

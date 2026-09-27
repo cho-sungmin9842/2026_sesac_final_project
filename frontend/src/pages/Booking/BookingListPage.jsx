@@ -16,7 +16,7 @@ function BookingListPage() {
 
   useEffect(() => {
     let cancelled = false
-    getNowShowing(10)
+    getNowShowing(8)
       .then((result) => {
         if (cancelled) return
         setMovies(result.movies)

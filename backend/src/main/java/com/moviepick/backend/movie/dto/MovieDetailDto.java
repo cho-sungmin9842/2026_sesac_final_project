@@ -16,6 +16,7 @@ public record MovieDetailDto(
         List<ActorDto> actors,
         String plot,
         String posterUrl,
+        List<String> posterUrls,
         List<String> stillUrls,
         List<String> keywords,
         List<TrailerDto> trailers,

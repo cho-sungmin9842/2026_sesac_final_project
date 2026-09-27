@@ -10,6 +10,7 @@ import BookingSeatPage from './pages/Booking/BookingSeatPage'
 import DownloadPage from './pages/Download/DownloadPage'
 import MyPage from './pages/MyPage/MyPage'
 import AdminReportsPage from './pages/Admin/AdminReportsPage'
+import AdminScreeningsPage from './pages/Admin/AdminScreeningsPage'
 import LoginPage from './pages/Auth/LoginPage'
 import SignupPage from './pages/Auth/SignupPage'
 import RequireAuth from './auth/RequireAuth'
@@ -47,6 +48,7 @@ function App() {
       >
         <Route index element={<Navigate to="reports" replace />} />
         <Route path="reports" element={<AdminReportsPage />} />
+        <Route path="screenings" element={<AdminScreeningsPage />} />
       </Route>
     </Routes>
   )

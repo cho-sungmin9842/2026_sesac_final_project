@@ -14,6 +14,8 @@ import java.util.List;
 public final class KmdbTextUtils {
 
     private static final String HIGHLIGHT_MARKER_PATTERN = "!HS|!HE";
+    // 한글/영문/숫자/공백만 남기고 나머지는 전부 지웁니다(#, -, +, :, !, ? 등).
+    private static final String SPECIAL_CHAR_PATTERN = "[^0-9A-Za-z가-힣\\s]";
 
     private KmdbTextUtils() {
     }
@@ -24,6 +26,18 @@ public final class KmdbTextUtils {
         }
         String cleaned = value.replaceAll(HIGHLIGHT_MARKER_PATTERN, "").replaceAll("\\s+", " ").trim();
         return cleaned.isEmpty() ? null : cleaned;
+    }
+
+    // 영화 제목(title) 전용 - "#살아있다"의 "#"이나 "가문의 영광 3-며느리 전성시대"의 "-"처럼 제목에 섞여
+    // 있는 특수문자를 지운 뒤 화면에 보여줍니다. 다만 "- +"나 "遺"(한자 한 글자)처럼 제목 자체가 특수문자/
+    // 한자 등으로만 이루어진 경우 다 지우면 빈 제목이 되어버리므로, 그럴 때는 원래 제목을 그대로 둡니다.
+    public static String cleanTitle(String value) {
+        String cleaned = clean(value);
+        if (cleaned == null) {
+            return null;
+        }
+        String withoutSpecialChars = cleaned.replaceAll(SPECIAL_CHAR_PATTERN, "").replaceAll("\\s+", " ").trim();
+        return withoutSpecialChars.isEmpty() ? cleaned : withoutSpecialChars;
     }
 
     public static List<String> splitPipe(String value) {

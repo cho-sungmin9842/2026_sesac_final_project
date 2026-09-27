@@ -9,6 +9,14 @@ async function request(path) {
   return response.json()
 }
 
+// KMDB의 genre 파라미터는 "멜로/로맨스"처럼 "/"가 낀 장르명을 그대로 넘기면 0건으로 매칭에 실패합니다
+// ("/" 앞부분만 보내도 전체 조합과 정확히 같은 결과가 나오는 걸 확인했습니다). 그래서 화면 표시는
+// 전체 이름("멜로/로맨스")을 쓰되, KMDB에 보낼 때만 "/" 앞부분("멜로")으로 잘라서 보냅니다.
+function toKmdbGenreParam(genre) {
+  const slashIndex = genre.indexOf('/')
+  return slashIndex === -1 ? genre : genre.slice(0, slashIndex)
+}
+
 /**
  * query가 빈 문자열이면 KMDB 전체 카탈로그를 대상으로 검색합니다(제목 필터 없음).
  * genre/year는 KMDB가 실제로 지원하는 필터라 서버(KMDB)에서 걸러진 결과가 옵니다.
@@ -16,12 +24,13 @@ async function request(path) {
  * sort(latest/name)는 KMDB에 정렬 파라미터가 없어서 백엔드가 여러 페이지 분량을 미리 받아와 직접 정렬합니다.
  * 응답은 { movies, page, pageSize, totalCount, totalPages } 형태입니다.
  */
-export function searchMovies(query, { genre, year, sort, page = 1, pageSize = 20 } = {}) {
+export function searchMovies(query, { genre, year, sort, page = 1, pageSize = 20, field } = {}) {
   const params = new URLSearchParams({ query, page, pageSize })
   const genreList = Array.isArray(genre) ? genre.filter(Boolean) : [genre].filter(Boolean)
-  genreList.forEach((value) => params.append('genre', value))
+  genreList.forEach((value) => params.append('genre', toKmdbGenreParam(value)))
   if (year) params.set('year', year)
   if (sort) params.set('sort', sort)
+  if (field) params.set('field', field)
   return request(`/api/movies?${params.toString()}`)
 }
 
@@ -30,9 +39,16 @@ export function getMovieDetail(id) {
 }
 
 /**
- * 예매 화면의 "상영중인 영화" 목록. 오늘 기준 최근 2개월 내 개봉일자(releaseDts~releaseDte)인 KMDB 영화를 가져옵니다.
+ * "AI 줄거리 요약 (스포방지)" 버튼용. Gemini가 결말/반전을 뺀 짧은 요약을 만들어 { summary } 형태로 내려줍니다.
  */
-export function getNowShowing(listCount = 10) {
+export function getAiSummary(id) {
+  return request(`/api/movies/${encodeURIComponent(id)}/ai-summary`)
+}
+
+/**
+ * 예매 화면의 "상영중인 영화" 목록. 오늘 기준 최근 4주 내 개봉일자(releaseDts~releaseDte)인 KMDB 영화를 가져옵니다.
+ */
+export function getNowShowing(listCount = 8) {
   return request(`/api/movies/now-showing?listCount=${listCount}`)
 }
 

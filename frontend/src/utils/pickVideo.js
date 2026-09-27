@@ -3,7 +3,6 @@
 const TRAILER_KEYWORDS = ['예고편', 'trailer']
 // 오래된 항목은 "예고편"이라는 말 없이 "1차"/"공식2차"/"메인"처럼 회차만 적혀있는 경우가 있습니다(예: 인터스텔라).
 const TRAILER_SHORT_LABEL_PATTERN = /^(\d+차|공식\s*\d*차|메인)$/
-const MAKING_KEYWORDS = ['메이킹', '제작기', '비하인드', 'making']
 
 function bracketContent(label) {
   return label?.match(/\[(.+)\]/)?.[1]?.trim() ?? null
@@ -16,28 +15,30 @@ function isTrailerLabel(label) {
   return bracket ? TRAILER_SHORT_LABEL_PATTERN.test(bracket) : false
 }
 
-function isMakingLabel(label) {
-  const lower = label?.toLowerCase() ?? ''
-  return MAKING_KEYWORDS.some((keyword) => lower.includes(keyword))
-}
-
 function findClip(trailers, isMatch) {
   return trailers?.find((clip) => clip.url && isMatch(clip.label))?.url ?? null
 }
 
-// 예고편이 있으면 예고편을, 없으면 메이킹류 영상을, 그마저 없으면 null을 돌려줍니다.
+// 포스터 호버 버튼은 실제로 "예고편"류(vodClass가 예고편/trailer 등)인 클립이 있을 때만 보여줍니다.
+// 메이킹/인터뷰 등 나머지 영상은 OtherVideoButtons가 따로 버튼으로 보여주므로 여기서는 대체하지 않습니다.
 export function pickVideo(trailers) {
   const trailerUrl = findClip(trailers, isTrailerLabel)
-  if (trailerUrl) return { url: trailerUrl, kind: 'trailer' }
+  return trailerUrl ? { url: trailerUrl, kind: 'trailer' } : null
+}
 
-  const makingUrl = findClip(trailers, isMakingLabel)
-  if (makingUrl) return { url: makingUrl, kind: 'making' }
+// 예고편(vodClass가 "예고편"류)이 아닌 나머지 vods(메이킹, 인터뷰, TV스팟 등)를 각각 버튼으로 보여주기 위한 목록.
+// 포스터 호버 버튼에 이미 쓰인 링크(selectedVideo)는 중복 노출을 막기 위해 제외합니다.
+export function pickOtherVideos(trailers, selectedVideo) {
+  if (!trailers) return []
 
-  // 최근 소규모 개봉작은 vodClass에 "예고편" 같은 구분 표시 없이 영화 제목만 그대로 붙어 있는 경우가 많습니다
-  // (예: vodClass="콘크리트 녹색섬"). 그래도 vodUrl 자체는 실제 재생 가능한 링크라서, 라벨로 구분이 안 되면
-  // 첫 번째로 발견되는 링크를 예고편으로 간주합니다.
-  const firstUrl = trailers?.find((clip) => clip.url)?.url ?? null
-  if (firstUrl) return { url: firstUrl, kind: 'trailer' }
-
-  return null
+  const seen = new Set()
+  const others = []
+  for (const clip of trailers) {
+    if (!clip.url || isTrailerLabel(clip.label)) continue
+    if (selectedVideo?.url === clip.url) continue
+    if (seen.has(clip.url)) continue
+    seen.add(clip.url)
+    others.push({ label: bracketContent(clip.label) ?? clip.label ?? '관련 영상', url: clip.url })
+  }
+  return others
 }

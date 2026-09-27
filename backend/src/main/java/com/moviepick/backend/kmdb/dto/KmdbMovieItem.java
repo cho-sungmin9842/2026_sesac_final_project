@@ -25,6 +25,7 @@ public class KmdbMovieItem {
     private String genre;
     private String runtime;
     private String rating;
+    private KmdbRatingContainer ratings;
     private String type;
     private String keywords;
     private String posters;
