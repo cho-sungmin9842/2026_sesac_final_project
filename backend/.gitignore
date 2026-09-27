@@ -38,4 +38,5 @@ out/
 
 ### Local secrets ###
 # KMDB ServiceKey 등 개인 로컬 설정 - 절대 커밋하지 않습니다.
+# 새로 clone한 사람은 application-local.yml.example을 복사해서 키를 채우세요.
 #src/main/resources/application-local.yml
