@@ -16,8 +16,11 @@ import lombok.Getter;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 @Entity
 @Table(name = "bookings")
@@ -49,8 +52,7 @@ public class Booking {
 
     @ElementCollection(fetch = FetchType.EAGER)
     @CollectionTable(name = "booking_seats", joinColumns = @JoinColumn(name = "booking_id"))
-    @Column(name = "seat_code", length = 10)
-    private Set<String> seats = new LinkedHashSet<>();
+    private List<SeatSelection> seats = new ArrayList<>();
 
     @Column(name = "total_price", nullable = false)
     private int totalPrice;
@@ -68,7 +70,7 @@ public class Booking {
             String theater,
             LocalDate showDate,
             String showtime,
-            Set<String> seats,
+            List<SeatSelection> seats,
             int totalPrice
     ) {
         this.user = user;
@@ -77,8 +79,13 @@ public class Booking {
         this.theater = theater;
         this.showDate = showDate;
         this.showtime = showtime;
-        this.seats = new LinkedHashSet<>(seats);
+        this.seats = new ArrayList<>(seats);
         this.totalPrice = totalPrice;
         this.createdAt = LocalDateTime.now();
+    }
+
+    // 좌석 코드만 필요한 곳(중복 예약 검사, 목록 응답 등)에서 쓰는 편의 메서드입니다.
+    public Set<String> seatCodes() {
+        return seats.stream().map(SeatSelection::getSeatCode).collect(Collectors.toCollection(LinkedHashSet::new));
     }
 }

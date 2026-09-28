@@ -115,6 +115,11 @@ public class ChatService {
         // 가끔 놓치는 경우가 실제로 있었습니다. "배우 OOO"/"OOO 감독" 패턴은 정규식으로 한 번 더 직접
         // 확인해서, Gemini가 아무 조건도 못 뽑았을 때만 안전망으로 보정합니다.
         filter = applyNameHintFallback(filter, request.message());
+        // "영화 OOO에 대해 알려줘"처럼 특정 제목을 콕 집어 물어봤는데도 Gemini가 이걸 movie_question이
+        // 아닌 recommend(그것도 아무 조건도 못 뽑은 빈 recommend)로 잘못 분류하는 경우가 있었습니다.
+        // 그 상태로 두면 findCandidates()가 조건 없는 "최신순 아무 영화나" 목록을 지어내 완전히 엉뚱한
+        // 추천을 하게 되므로, 제목이 뚜렷하게 언급된 경우엔 movie_question으로 바로잡습니다.
+        filter = applyMovieQuestionHintFallback(filter, request.message());
         // "2개", "3편"처럼 숫자로 개수를 콕 집었는데 Gemini가 count를 못 뽑은 경우의 안전망입니다.
         filter = applyCountHintFallback(filter, request.message());
         // "비슷한 영화 더 추천해줘"처럼 특정 영화를 다시 언급하지 않고 "더/비슷하게"만 말하면, Gemini가
@@ -219,9 +224,11 @@ public class ChatService {
                 함께 다시 판단해서 조건을 JSON으로 뽑아라(이전 메시지의 조건을 그대로 재사용하지 말고 이번
                 메시지 기준으로 매번 새로 판단해라). 오늘 날짜는 %s이다.
 
-                - intent: "이 영화 장르가 뭐야", "배우가 누구야", "감독/줄거리/러닝타임 알려줘"처럼 영화
-                  "한 편 자체"의 정보를 묻는 질문일 때만 "movie_question"이다. "추천"이 들어간 요청은
-                  전부 "recommend"다. 특히 "이 영화와 같은 장르로 추천해줘", "그거랑 비슷한 걸로 또
+                - intent: "이 영화 장르가 뭐야", "배우가 누구야", "감독/줄거리/러닝타임 알려줘",
+                  "영화 OOO에 대해 알려줘"/"OOO 정보 알려줘"/"OOO 줄거리 알려줘"처럼 영화 제목 하나를
+                  콕 집어 그 영화 "한 편 자체"의 정보를 묻는 질문일 때만 "movie_question"이다(문장에
+                  "추천"이라는 말이 없고 특정 제목 하나만 물어보면 movie_question일 가능성이 높다).
+                  "추천"이 들어간 요청은 전부 "recommend"다. 특히 "이 영화와 같은 장르로 추천해줘", "그거랑 비슷한 걸로 또
                   추천해줘"처럼 이전에 나온 영화를 "기준"으로만 삼아 새 후보를 찾아달라는 요청도 movie_question이
                   아니라 recommend다. 날씨/시간/잡담/다른 서비스 질문처럼 영화 추천이나 특정 영화 정보와
                   전혀 관련 없는 메시지는 "off_topic"이다(이때는 genre/year/query 등 나머지 필드는 전부
@@ -260,6 +267,8 @@ public class ChatService {
                   {"intent":"recommend","referenceTitle":"군체","genre":null,"query":null,"year":null,"count":null}
                 - "2020년 개봉작으로 추천해줘" -> {"intent":"recommend","referenceTitle":null,"genre":null,"query":null,"year":"2020","count":null}
                 - "감독이 누구야" -> {"intent":"movie_question","query":"군체","queryField":"title"}
+                - "영화 퍼펙트게임에 대해 알려줘" ->
+                  {"intent":"movie_question","referenceTitle":null,"genre":null,"query":"퍼펙트게임","queryField":"title","year":null,"count":null}
                 - "배우 송지효가 출연한 영화를 알려줘" (이전 대화 주제가 전혀 다른 영화였어도) ->
                   {"intent":"recommend","referenceTitle":null,"genre":null,"query":"송지효","queryField":"actor","year":null,"count":null}
                 - "좀비를 소재로 한 영화를 추천해줘" ->
@@ -310,6 +319,14 @@ public class ChatService {
         ObjectNode countProp = properties.putObject("count");
         countProp.put("type", "INTEGER");
         countProp.put("nullable", true);
+
+        // "required"가 없으면 Gemini가 값을 못 정한 nullable 필드를 아예 통째로 생략해버리는 경우가
+        // 있었습니다(예: "액션 영화 추천해줘"에 genre 키 자체가 통째로 빠진 채 응답 - null도 아니고 키가
+        // 없어서 결과적으로 아무 조건도 못 뽑은 것과 똑같이 처리돼버림). 모든 필드를 required로 못 박아
+        // 두면 값이 없을 때도 명시적으로 null을 채워 넣도록 강제할 수 있습니다(nullable:true라 null 자체는
+        // 여전히 허용됩니다).
+        ArrayNode required = schema.putArray("required");
+        properties.fieldNames().forEachRemaining(required::add);
 
         List<GeminiClient.ChatTurn> turns = new ArrayList<>(history);
         turns.add(new GeminiClient.ChatTurn("user", message));
@@ -451,6 +468,32 @@ public class ChatService {
         }
 
         return filter;
+    }
+
+    private static final java.util.regex.Pattern MOVIE_QUESTION_HINT = java.util.regex.Pattern.compile(
+            "영화\\s*['\"]?([가-힣a-zA-Z0-9:!~\\-\\s]{1,20}?)['\"]?\\s*(?:에\\s*대해서?|의\\s*정보|줄거리|스토리)?\\s*"
+                    + "(?:알려줘|알려주세요|말해줘|설명해줘|궁금해|궁금합니다|뭐야|뭔가요|뭔지)");
+
+    // Gemini 추출 결과가 완전히 비어있는 recommend일 때만(장르/연도/검색어/기준영화 전부 null), "영화 OOO에
+    // 대해 알려줘"처럼 특정 제목을 콕 집어 물어본 패턴을 정규식으로 한 번 더 확인합니다. 이 패턴은 명백히
+    // "영화 한 편 자체"에 대한 질문이라 movie_question으로 바로잡고, 그 제목을 query로 채웁니다.
+    private ExtractedFilter applyMovieQuestionHintFallback(ExtractedFilter filter, String message) {
+        boolean isEmpty = "recommend".equals(filter.intent())
+                && filter.genre() == null && filter.year() == null && filter.runtimeMaxMinutes() == null
+                && filter.query() == null && filter.referenceTitle() == null;
+        if (!isEmpty) {
+            return filter;
+        }
+
+        java.util.regex.Matcher matcher = MOVIE_QUESTION_HINT.matcher(message);
+        if (!matcher.find()) {
+            return filter;
+        }
+        String title = matcher.group(1).trim();
+        if (title.isEmpty()) {
+            return filter;
+        }
+        return new ExtractedFilter("movie_question", null, null, null, title, "title", null, filter.count());
     }
 
     private static final java.util.regex.Pattern COUNT_HINT = java.util.regex.Pattern.compile("(\\d+)\\s*(?:개|편|가지)");

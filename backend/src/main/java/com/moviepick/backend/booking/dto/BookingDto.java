@@ -25,7 +25,7 @@ public record BookingDto(
                 booking.getTheater(),
                 booking.getShowDate(),
                 booking.getShowtime(),
-                List.copyOf(booking.getSeats()),
+                List.copyOf(booking.seatCodes()),
                 booking.getTotalPrice(),
                 booking.getCreatedAt()
         );

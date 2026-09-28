@@ -68,6 +68,10 @@ CREATE TABLE IF NOT EXISTS bookings (
 CREATE TABLE IF NOT EXISTS booking_seats (
     booking_id BIGINT      NOT NULL,
     seat_code  VARCHAR(10) NOT NULL,
+    -- 'REGULAR'(일반석) 또는 'ACCESSIBLE'(장애인/휠체어석). 어떤 seat_code가 장애인석인지는 프론트
+    -- (bookingData.js의 ACCESSIBLE_SEATS)와 백엔드(BookingService의 같은 이름 목록)가 값을 맞춰서 들고 있고,
+    -- 최종 판정은 서버가 합니다(클라이언트가 좌석 종류를 조작해서 보낼 수 없도록).
+    seat_type  VARCHAR(20) NOT NULL DEFAULT 'REGULAR',
     PRIMARY KEY (booking_id, seat_code),
     CONSTRAINT fk_booking_seats_booking FOREIGN KEY (booking_id) REFERENCES bookings (id) ON DELETE CASCADE
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;

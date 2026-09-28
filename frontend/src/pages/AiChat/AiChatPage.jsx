@@ -4,7 +4,16 @@ import { getChatHistory, sendChatMessage } from '../../api/chatApi'
 import ChatBubble from './components/ChatBubble'
 import ChatMovieRecommendation from './components/ChatMovieRecommendation'
 
-const QUICK_REPLIES = ['비슷한 영화 더 추천해줘', '이 영화 비하인드 스토리 알려줘']
+const QUICK_REPLIES = [
+  '같은 장르의 영화들을 추천해줘',
+  '이번 주말에 볼만한 영화 추천해줘',
+  '짧고 가볍게 볼 영화 추천해줘',
+  '이 영화 찜해줘',
+  '이 영화 바로 예매해줘',
+]
+
+// 아직 실제 동작(예매 처리 등)이 연결되지 않은 빠른 답변 - 클릭해도 아무 일도 일어나지 않도록 비활성화합니다.
+const DISABLED_QUICK_REPLIES = new Set(['이 영화 바로 예매해줘'])
 
 const GREETING = { id: 0, from: 'ai', type: 'text', content: '안녕하세요! 저는 새싹무비 AI 큐레이터예요 🎬 오늘 어떤 영화를 찾아드릴까요?' }
 
@@ -104,12 +113,12 @@ function AiChatPage() {
         )}
       </div>
 
-      <div className="mb-3 flex gap-2">
+      <div className="mb-3 flex flex-wrap gap-2">
         {QUICK_REPLIES.map((reply) => (
           <button
             key={reply}
             type="button"
-            disabled={isSending}
+            disabled={isSending || DISABLED_QUICK_REPLIES.has(reply)}
             onClick={() => sendMessage(reply)}
             className="rounded-full border border-gray-700 px-3 py-1.5 text-xs text-gray-300 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
           >

@@ -6,6 +6,9 @@ import { getWatched } from '../../api/watchedApi'
 import { deleteReview, getMyReviews, updateReview } from '../../api/reviewApi'
 import { getPreferredGenres, updatePreferredGenres } from '../../api/userApi'
 import { getMovieDetail } from '../../api/movieApi'
+import { getChatHistory } from '../../api/chatApi'
+import ChatBubble from '../AiChat/components/ChatBubble'
+import ChatMovieRecommendation from '../AiChat/components/ChatMovieRecommendation'
 import { genreLabel, genres as ALL_GENRES } from '../MovieList/components/filterOptions'
 import MovieCard from '../../components/common/MovieCard'
 import WriteReviewDialog from '../MovieDetail/components/WriteReviewDialog'
@@ -132,6 +135,33 @@ function SavedGenresDialog({ onClose }) {
   )
 }
 
+// AI 채팅 화면(ChatBubble/ChatMovieRecommendation)과 똑같은 컴포넌트를 그대로 재사용해서, 실제 대화를
+// 나눴던 화면을 그대로 다시 보는 듯한 말풍선 느낌을 줍니다(마이페이지 전용으로 새로 디자인하지 않음).
+function MyChatHistoryList({ messages, isLoading }) {
+  if (isLoading) {
+    return <p className="text-sm text-gray-500">불러오는 중...</p>
+  }
+  if (messages.length === 0) {
+    return <p className="text-sm text-gray-500">AI 채팅 기록이 아직 없습니다.</p>
+  }
+  return (
+    <div className="space-y-4 rounded-xl bg-slate-950/40 p-4">
+      {messages.map((message, index) => {
+        const from = message.role === 'user' ? 'user' : 'ai'
+        return (
+          <ChatBubble key={index} from={from}>
+            {from === 'ai' && message.movies.length > 0 ? (
+              <ChatMovieRecommendation analysis={message.content} movies={message.movies} />
+            ) : (
+              <span className="whitespace-pre-line">{message.content}</span>
+            )}
+          </ChatBubble>
+        )
+      })}
+    </div>
+  )
+}
+
 function MyReviewList({ reviews, onEdit, onDelete }) {
   if (reviews.length === 0) {
     return <p className="text-sm text-gray-500">아직 작성한 리뷰가 없습니다.</p>
@@ -178,6 +208,8 @@ function MyPage() {
   const [wishlistMovies, setWishlistMovies] = useState([])
   const [watchedMovies, setWatchedMovies] = useState([])
   const [myReviews, setMyReviews] = useState([])
+  const [chatHistory, setChatHistory] = useState([])
+  const [chatHistoryLoading, setChatHistoryLoading] = useState(true)
   const [editingReview, setEditingReview] = useState(null)
   const [preferredGenres, setPreferredGenres] = useState([])
   const [savedGenres, setSavedGenres] = useState([])
@@ -209,6 +241,17 @@ function MyPage() {
         })
       })
       .catch(() => {})
+
+    getChatHistory(user.id)
+      .then((history) => {
+        if (cancelled) return
+        setChatHistory(history)
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setChatHistoryLoading(false)
+      })
+
     return () => {
       cancelled = true
     }
@@ -318,8 +361,9 @@ function MyPage() {
         {activeTab === '내가 쓴 리뷰' && (
           <MyReviewList reviews={myReviews} onEdit={handleReviewEdit} onDelete={handleReviewDelete} />
         )}
-        {/* AI 채팅 기록은 아직 백엔드가 없어 빈 상태만 보여줍니다. */}
-        {activeTab === 'AI 채팅 기록' && <p className="text-sm text-gray-500">AI 채팅 기록이 아직 없습니다.</p>}
+        {activeTab === 'AI 채팅 기록' && (
+          <MyChatHistoryList messages={chatHistory} isLoading={chatHistoryLoading} />
+        )}
       </div>
 
       {editingReview && (

@@ -10,6 +10,12 @@ export const SHOWTIMES = ['13:00', '16:30', '19:00', '21:40']
 export const SEAT_ROWS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']
 export const SEATS_PER_ROW = 13
 
+// 장애인(휠체어)석 - 스크린과 가장 가까운 맨 앞줄(A열) 전체를 장애인석으로, 그 외 모든 좌석은 일반석으로 지정합니다.
+// 백엔드 BookingService의 같은 이름의 목록과 반드시 값을 맞춰야 합니다(좌석 종류를 서버가 최종 판정하므로).
+export const ACCESSIBLE_SEATS = new Set(
+  Array.from({ length: SEATS_PER_ROW }, (_, i) => `${SEAT_ROWS[0]}${i + 1}`),
+)
+
 // 연령 구분별 요금표. 주중=월~목, 주말=금~일 및 공휴일(요금표 기준).
 export const AGE_CATEGORIES = [
   { key: 'adult', label: '성인', sublabel: '만 19세 이상', weekdayPrice: 14000, weekendPrice: 15000 },

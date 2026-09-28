@@ -94,7 +94,7 @@ function Header() {
         </div>
       </form>
 
-      <div className="flex items-center gap-4">
+      <div className="ml-auto flex items-center gap-4">
         <button type="button" aria-label="알림" className="text-gray-300 hover:text-white">
           🔔
         </button>

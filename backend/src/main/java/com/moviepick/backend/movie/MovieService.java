@@ -136,9 +136,16 @@ public class MovieService {
         return persons != null && persons.stream().anyMatch(person -> containsIgnoreCase(person.displayName(), needle));
     }
 
+    // KMDB의 실제 표기(예: "퍼펙트 게임")와 사용자가 입력하는 표기(예: "퍼펙트게임") 사이에 띄어쓰기
+    // 차이만 있는 경우가 흔해서, 비교 시에는 양쪽 모두 공백을 없앤 뒤 부분 일치를 검사합니다.
     private boolean containsIgnoreCase(String value, String needle) {
         String cleaned = KmdbTextUtils.clean(value);
-        return cleaned != null && cleaned.toLowerCase(Locale.KOREAN).contains(needle.toLowerCase(Locale.KOREAN));
+        if (cleaned == null) {
+            return false;
+        }
+        String normalizedValue = cleaned.toLowerCase(Locale.KOREAN).replaceAll("\\s+", "");
+        String normalizedNeedle = needle.toLowerCase(Locale.KOREAN).replaceAll("\\s+", "");
+        return normalizedValue.contains(normalizedNeedle);
     }
 
     // 검색창의 영화/배우/감독 드롭다운 값을 KMDB의 실제 파라미터명(title/actor/director)에 그대로 매핑합니다.

@@ -5,7 +5,15 @@ import { getMovieDetail } from '../../api/movieApi'
 import { createBooking, getReservedSeats } from '../../api/bookingApi'
 import PosterPlaceholder from '../../components/common/PosterPlaceholder'
 import SeatMap from './components/SeatMap'
-import { AGE_CATEGORIES, SHOWTIMES, THEATERS, getBookingDates, isWeekendOrHoliday, priceFor } from './bookingData'
+import {
+  ACCESSIBLE_SEATS,
+  AGE_CATEGORIES,
+  SHOWTIMES,
+  THEATERS,
+  getBookingDates,
+  isWeekendOrHoliday,
+  priceFor,
+} from './bookingData'
 
 const DATES = getBookingDates()
 
@@ -69,6 +77,11 @@ function BookingSeatPage() {
   }, [id, theater, showDate, showtime])
 
   const toggleSeat = (seatId) => {
+    const isCurrentlySelected = selectedSeats.includes(seatId)
+    if (!isCurrentlySelected && ACCESSIBLE_SEATS.has(seatId)) {
+      const confirmed = window.confirm('장애인석을 선택했습니다.\n장애인석을 선택하시겠습니까?')
+      if (!confirmed) return
+    }
     setSelectedSeats((prev) =>
       prev.includes(seatId) ? prev.filter((seat) => seat !== seatId) : [...prev, seatId],
     )
