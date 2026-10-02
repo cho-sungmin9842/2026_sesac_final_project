@@ -2,14 +2,9 @@ package com.moviepick.backend.booking;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 
-import java.time.LocalDate;
 import java.util.List;
 
 public interface BookingRepository extends JpaRepository<Booking, Long> {
-
-    List<Booking> findByMovieIdAndTheaterAndShowDateAndShowtime(
-            String movieId, String theater, LocalDate showDate, String showtime
-    );
-
+    // 마이페이지 "예매 내역" 탭 - 최신 예매부터 보여줍니다.
     List<Booking> findByUserIdOrderByCreatedAtDesc(Long userId);
 }

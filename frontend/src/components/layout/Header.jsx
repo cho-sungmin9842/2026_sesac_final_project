@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react'
 import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../auth/AuthContext'
+import NotificationBell from './NotificationBell'
 
 const NAV_LINKS = [
   { to: '/', label: '홈' },
   { to: '/booking', label: '예매' },
-  { to: '/download', label: '다운로드' },
   { to: '/ai-chat', label: 'AI 추천' },
 ]
 
@@ -95,9 +95,7 @@ function Header() {
       </form>
 
       <div className="ml-auto flex items-center gap-4">
-        <button type="button" aria-label="알림" className="text-gray-300 hover:text-white">
-          🔔
-        </button>
+        <NotificationBell />
         <span className="text-sm text-gray-400">{user?.nickname}</span>
         <NavLink to="/mypage" aria-label="마이페이지">
           <span className="block h-8 w-8 rounded-full bg-gradient-to-br from-orange-400 to-red-500" />

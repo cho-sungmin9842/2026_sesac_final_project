@@ -4,6 +4,7 @@ import com.moviepick.backend.common.ApiException;
 import com.moviepick.backend.movie.dto.AiSummaryDto;
 import com.moviepick.backend.movie.dto.MovieDetailDto;
 import com.moviepick.backend.movie.dto.MovieSearchResultDto;
+import com.moviepick.backend.movie.dto.MovieSummaryDto;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -45,6 +46,17 @@ public class MovieController {
     @GetMapping("/api/movies/now-showing")
     public MovieSearchResultDto getNowShowing(@RequestParam(defaultValue = "8") int listCount) {
         return movieService.getNowShowing(listCount);
+    }
+
+    /**
+     * 홈 화면 "지금 인기 있는 영화". 고정된 제목 목록이 아니라, 실제 사용자 리뷰 평균 평점이 minScore 이상인 영화를 평점순으로 내려줍니다.
+     */
+    @GetMapping("/api/movies/popular")
+    public List<MovieSummaryDto> getPopular(
+            @RequestParam(defaultValue = "4") double minScore,
+            @RequestParam(defaultValue = "6") int limit
+    ) {
+        return movieService.getPopularMovies(minScore, limit);
     }
 
     /**

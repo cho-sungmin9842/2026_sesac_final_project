@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../../auth/AuthContext'
+import { useWishlist } from '../../wishlist/WishlistContext'
 import { getWishlist } from '../../api/wishlistApi'
 import { getWatched } from '../../api/watchedApi'
+import { getMyBookings } from '../../api/bookingApi'
 import { deleteReview, getMyReviews, updateReview } from '../../api/reviewApi'
 import { getPreferredGenres, updatePreferredGenres } from '../../api/userApi'
 import { getMovieDetail } from '../../api/movieApi'
@@ -15,7 +17,7 @@ import WriteReviewDialog from '../MovieDetail/components/WriteReviewDialog'
 import AiTasteReport from './components/AiTasteReport'
 import ProfileHeader from './components/ProfileHeader'
 
-const TABS = ['찜한 영화', '시청완료', '내가 쓴 리뷰', 'AI 채팅 기록']
+const TABS = ['예매 내역', '찜한 영화', '시청완료', '내가 쓴 리뷰', 'AI 채팅 기록']
 // "전체"는 필터 전용 옵션이라 개인 취향 선택지에서는 뺍니다.
 const SELECTABLE_GENRES = ALL_GENRES.filter((genre) => genre !== '전체')
 
@@ -162,6 +164,43 @@ function MyChatHistoryList({ messages, isLoading }) {
   )
 }
 
+function MyBookingList({ bookings, isLoading }) {
+  if (isLoading) {
+    return <p className="text-sm text-gray-500">불러오는 중...</p>
+  }
+  if (bookings.length === 0) {
+    return <p className="text-sm text-gray-500">예매 내역이 아직 없습니다.</p>
+  }
+  return (
+    <div className="space-y-3">
+      {bookings.map((booking) => (
+        <div key={booking.id} className="rounded-lg bg-slate-900 p-4">
+          <div className="flex items-center justify-between">
+            {booking.movieId ? (
+              <Link
+                to={`/movies/${booking.movieId}`}
+                className="text-sm font-semibold text-gray-200 hover:text-white hover:underline"
+              >
+                {booking.movieTitle}
+              </Link>
+            ) : (
+              <span className="text-sm font-semibold text-gray-200">{booking.movieTitle}</span>
+            )}
+            <span className="text-xs text-gray-500">{formatShortDate(booking.createdAt)} 예매</span>
+          </div>
+          <p className="mt-1 text-xs text-gray-400">
+            {booking.theaterName} · {booking.showDate} {booking.showtime}
+          </p>
+          <div className="mt-2 flex items-center justify-between text-sm">
+            <span className="text-gray-300">좌석 {booking.seats.join(', ')}</span>
+            <span className="font-semibold text-white">{booking.totalPrice.toLocaleString()}원</span>
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function MyReviewList({ reviews, onEdit, onDelete }) {
   if (reviews.length === 0) {
     return <p className="text-sm text-gray-500">아직 작성한 리뷰가 없습니다.</p>
@@ -202,7 +241,10 @@ function MyReviewList({ reviews, onEdit, onDelete }) {
 
 function MyPage() {
   const { user } = useAuth()
+  const { wishlistedIds } = useWishlist()
   const [activeTab, setActiveTab] = useState(TABS[0])
+  const [bookings, setBookings] = useState([])
+  const [bookingsLoading, setBookingsLoading] = useState(true)
   const [wishlist, setWishlist] = useState([])
   const [watched, setWatched] = useState([])
   const [wishlistMovies, setWishlistMovies] = useState([])
@@ -222,6 +264,17 @@ function MyPage() {
 
   useEffect(() => {
     let cancelled = false
+
+    getMyBookings(user.id)
+      .then((bookingList) => {
+        if (cancelled) return
+        setBookings(bookingList)
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setBookingsLoading(false)
+      })
+
     Promise.all([getWishlist(user.id), getWatched(user.id), getMyReviews(user.id), getPreferredGenres(user.id)])
       .then(([wishlistList, watchedList, reviewList, preferredGenresDto]) => {
         if (cancelled) return
@@ -305,11 +358,14 @@ function MyPage() {
     }
   }
 
+  // 찜 목록 개수/카드 목록은 WishlistContext(실시간 찜 설정/해제 상태)를 기준으로 다시 걸러냅니다.
+  const visibleWishlistMovies = wishlistMovies.filter((movie) => wishlistedIds.has(movie.id))
+
   const profile = {
     nickname: user.nickname,
     joinedAt: formatJoinedAt(user.createdAt),
     reviewCount: myReviews.length,
-    wishlistCount: wishlist.length,
+    wishlistCount: wishlistedIds.size,
     watchedCount: watched.length,
   }
 
@@ -344,9 +400,10 @@ function MyPage() {
       </div>
 
       <div className="mt-6">
+        {activeTab === '예매 내역' && <MyBookingList bookings={bookings} isLoading={bookingsLoading} />}
         {activeTab === '찜한 영화' && (
           <MoviePosterGrid
-            movies={wishlistMovies}
+            movies={visibleWishlistMovies}
             isLoading={wishlist.length > 0 && wishlistMovies.length === 0}
             emptyMessage="찜한 영화가 아직 없습니다."
           />

@@ -41,3 +41,11 @@ gemini:
 app:
   cors:
     allowed-origins: http://localhost:5173,http://localhost:5174
+
+# 토스페이먼츠 결제위젯(테스트). secret-key는 실제 가맹점 키가 아니라, 토스페이먼츠가 공식 문서/샘플
+# 프로젝트(github.com/tosspayments/tosspayments-sample)에서 누구나 테스트하도록 공개해둔 "문서용 테스트 키"라
+# 커밋해도 안전합니다(실결제 불가). 프론트의 클라이언트 키(test_gck_docs_...)도 같은 세트입니다.
+# 실제 서비스로 전환할 때는 토스페이먼츠 개발자센터에서 발급받은 가맹점 전용 시크릿 키로 바꾸세요.
+toss:
+  base-url: https://api.tosspayments.com
+  secret-key: ${TOSS_SECRET_KEY:test_gsk_docs_OaPz8L5KdmQXkzRz3y47BMw6}

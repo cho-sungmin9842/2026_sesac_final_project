@@ -60,4 +60,8 @@ public class User {
     public void updatePreferredGenres(Set<String> genres) {
         this.preferredGenres = new LinkedHashSet<>(genres);
     }
+
+    public void changePassword(String newPasswordHash) {
+        this.passwordHash = newPasswordHash;
+    }
 }

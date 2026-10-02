@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { useAuth } from '../../auth/AuthContext'
+import { useWishlist } from '../../wishlist/WishlistContext'
 import { getMovieDetail } from '../../api/movieApi'
 import { addReview, deleteReview, getReviews, updateReview } from '../../api/reviewApi'
-import { addWishlist, isWishlisted, removeWishlist } from '../../api/wishlistApi'
 import { addWatched, isWatched, removeWatched } from '../../api/watchedApi'
 import AiSummaryBox from './components/AiSummaryBox'
 import OtherVideoButtons from './components/OtherVideoButtons'
@@ -16,25 +16,26 @@ import { normalizeDetail } from './normalizeDetail'
 function MovieDetailPage() {
   const { id } = useParams()
   const { user } = useAuth()
+  const { wishlistedIds, toggle: toggleWishlist } = useWishlist()
   const [status, setStatus] = useState('loading') // loading | ready | error
   const [detail, setDetail] = useState(null)
   const [errorMessage, setErrorMessage] = useState('')
   const [reviews, setReviews] = useState([])
   const [isDialogOpen, setDialogOpen] = useState(false)
   const [editingReview, setEditingReview] = useState(null)
-  const [wishlisted, setWishlisted] = useState(false)
   const [watched, setWatched] = useState(false)
+
+  const wishlisted = wishlistedIds.has(id)
 
   useEffect(() => {
     let cancelled = false
     setStatus('loading')
 
-    Promise.all([getMovieDetail(id), getReviews(id), isWishlisted(user.id, id), isWatched(user.id, id)])
-      .then(([dto, reviewList, wishlistedFlag, watchedFlag]) => {
+    Promise.all([getMovieDetail(id), getReviews(id), isWatched(user.id, id)])
+      .then(([dto, reviewList, watchedFlag]) => {
         if (cancelled) return
         setDetail(normalizeDetail(dto))
         setReviews(reviewList)
-        setWishlisted(wishlistedFlag)
         setWatched(watchedFlag)
         setStatus('ready')
       })
@@ -49,18 +50,8 @@ function MovieDetailPage() {
     }
   }, [id, user.id])
 
-  const handleToggleWishlist = async () => {
-    try {
-      if (wishlisted) {
-        await removeWishlist(user.id, id)
-        setWishlisted(false)
-      } else {
-        await addWishlist(user.id, { movieId: id, movieTitle: detail.title, posterUrl: detail.posterUrl })
-        setWishlisted(true)
-      }
-    } catch (error) {
-      window.alert(error.message)
-    }
+  const handleToggleWishlist = () => {
+    toggleWishlist({ id, title: detail.title, posterUrl: detail.posterUrl })
   }
 
   const handleToggleWatched = async () => {

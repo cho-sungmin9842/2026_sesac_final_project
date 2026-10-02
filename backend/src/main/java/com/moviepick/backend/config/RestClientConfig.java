@@ -20,4 +20,11 @@ public class RestClientConfig {
                 .baseUrl(geminiProperties.baseUrl())
                 .build();
     }
+
+    @Bean
+    public RestClient tossRestClient(TossPaymentsProperties tossPaymentsProperties) {
+        return RestClient.builder()
+                .baseUrl(tossPaymentsProperties.baseUrl())
+                .build();
+    }
 }

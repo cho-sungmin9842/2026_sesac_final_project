@@ -47,8 +47,10 @@ export function getAiSummary(id) {
 
 /**
  * 예매 화면의 "상영중인 영화" 목록. 오늘 기준 최근 4주 내 개봉일자(releaseDts~releaseDte)인 KMDB 영화를 가져옵니다.
+ * listCount 기본값은 날짜마다 달라지는 실제 개봉작 수(KMDB TotalCount)를 자르지 않도록, 백엔드가 한 번에
+ * 받아오는 한도(500)와 동일하게 넉넉히 잡아둡니다 - 실제로는 그보다 훨씬 적은 전체 목록이 그대로 내려옵니다.
  */
-export function getNowShowing(listCount = 8) {
+export function getNowShowing(listCount = 500) {
   return request(`/api/movies/now-showing?listCount=${listCount}`)
 }
 
@@ -65,4 +67,12 @@ export async function getFirstMatches(titles) {
     ),
   )
   return results.filter(Boolean)
+}
+
+/**
+ * 홈 화면 "지금 인기 있는 영화". 고정된 제목 목록이 아니라, 실제 사용자 리뷰 평균 평점이
+ * minScore 이상인 영화를 평점순으로 서버에서 직접 조회합니다.
+ */
+export function getPopularMovies(minScore = 4, limit = 6) {
+  return request(`/api/movies/popular?minScore=${minScore}&limit=${limit}`)
 }

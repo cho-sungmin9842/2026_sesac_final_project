@@ -1,12 +1,8 @@
 import { useState } from 'react'
-import { ACCESSIBLE_SEATS, SEAT_ROWS, SEATS_PER_ROW } from '../bookingData'
 
-// 왼쪽/가운데/오른쪽 세 블록으로 나눠서 표시합니다(사진처럼 통로로 구분된 모양).
-const BLOCK_RANGES = [
-  [1, 3],
-  [4, 10],
-  [11, SEATS_PER_ROW],
-]
+// 왼쪽/가운데/오른쪽 세 블록으로 나눠서 표시합니다(사진처럼 통로로 구분된 모양). 좌/우 블록은 3열씩,
+// 가운데 블록이 나머지를 전부 가져갑니다(열 수가 바뀌어도 똑같은 비율로 동작합니다).
+const EDGE_BLOCK_SIZE = 3
 
 function seatClassName(state, isAccessible) {
   const accessibleRing = isAccessible ? 'ring-2 ring-blue-400 ring-offset-1 ring-offset-white' : ''
@@ -15,8 +11,16 @@ function seatClassName(state, isAccessible) {
   return `bg-gray-300 hover:bg-orange-200 ${accessibleRing}`
 }
 
-function SeatMap({ reservedSeats, selectedSeats, onToggleSeat }) {
+// seats: [{ id, rowLabel, colNo, seatType, status }] - 실제 screening의 좌석 배치도 그대로입니다.
+function SeatMap({ seats, selectedSeats, onToggleSeat }) {
   const [showAccessibleInfo, setShowAccessibleInfo] = useState(false)
+
+  const rows = [...new Set(seats.map((seat) => seat.rowLabel))].sort()
+  const colCount = seats.reduce((max, seat) => Math.max(max, seat.colNo), 0)
+  const seatsByRow = rows.reduce((acc, row) => {
+    acc[row] = seats.filter((seat) => seat.rowLabel === row).sort((a, b) => a.colNo - b.colNo)
+    return acc
+  }, {})
 
   return (
     <div>
@@ -36,25 +40,26 @@ function SeatMap({ reservedSeats, selectedSeats, onToggleSeat }) {
       </div>
 
       <div className="flex flex-col items-center gap-1.5">
-        {SEAT_ROWS.map((row) => (
+        {rows.map((row) => (
           <div key={row} className="flex items-center gap-1.5">
             <span className="w-4 text-xs text-gray-400">{row}</span>
-            {Array.from({ length: SEATS_PER_ROW }, (_, i) => i + 1).map((col) => {
-              const seatId = `${row}${col}`
-              const isReserved = reservedSeats.has(seatId)
-              const isSelected = selectedSeats.includes(seatId)
-              const isAccessible = ACCESSIBLE_SEATS.has(seatId)
+            {seatsByRow[row].map((seat) => {
+              const isReserved = seat.status === 'BOOKED'
+              const isSelected = selectedSeats.includes(seat.id)
+              const isAccessible = seat.seatType === 'WHEELCHAIR'
               const state = isReserved ? 'reserved' : isSelected ? 'selected' : 'available'
+              const label = `${seat.rowLabel}${seat.colNo}`
               // 블록(왼쪽/가운데/오른쪽)이 바뀌는 경계에 통로 간격을 둡니다.
-              const isBlockStart = BLOCK_RANGES.some(([start]) => start === col) && col !== 1
+              const isBlockStart =
+                seat.colNo !== 1 && (seat.colNo === EDGE_BLOCK_SIZE + 1 || seat.colNo === colCount - EDGE_BLOCK_SIZE + 1)
 
               return (
                 <button
-                  key={seatId}
+                  key={seat.id}
                   type="button"
                   disabled={isReserved}
-                  onClick={() => onToggleSeat(seatId)}
-                  aria-label={isAccessible ? `${seatId} (장애인석)` : seatId}
+                  onClick={() => onToggleSeat(seat)}
+                  aria-label={isAccessible ? `${label} (장애인석)` : label}
                   className={`h-5 w-5 rounded-sm text-[10px] ${seatClassName(state, isAccessible)} ${isBlockStart ? 'ml-4' : ''}`}
                 />
               )

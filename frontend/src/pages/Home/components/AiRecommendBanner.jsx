@@ -7,9 +7,6 @@ function AiRecommendBanner() {
         <h2 className="flex items-center gap-2 text-xl font-bold text-white">
           🎬 AI에게 오늘의 영화 추천받기
         </h2>
-        <p className="mt-1 text-sm text-indigo-100">
-          기분, 시간, 취향만 말해주면 AI가 딱 맞는 영화를 골라드려요
-        </p>
       </div>
       <Link
         to="/ai-chat"

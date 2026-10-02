@@ -12,7 +12,9 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 영화 상세 줄거리를 Gemini로 스포일러 없이 요약합니다.
- * 같은 영화를 다시 열어도 Gemini를 또 호출하지 않도록 결과를 메모리에 캐싱합니다(서버가 떠 있는 동안 유지).
+ * 2단계 캐시: 메모리(같은 서버 uptime 안에서는 DB도 안 거치고 즉시 반환) + DB(ai_summaries 테이블, 서버를
+ * 재시작해도 유지 - 그전엔 메모리 캐시뿐이라 재시작할 때마다 전부 날아가고 Gemini를 다시 호출했습니다.
+ * 영화가 5만 편이 넘고 무료 Gemini 호출 한도가 낮아서, 같은 영화를 또 요약하는 낭비를 막는 게 중요합니다).
  */
 @Service
 public class AiSummaryService {
@@ -26,15 +28,27 @@ public class AiSummaryService {
 
     private final MovieService movieService;
     private final GeminiClient geminiClient;
+    private final AiSummaryRepository aiSummaryRepository;
     private final Map<String, String> cache = new ConcurrentHashMap<>();
 
-    public AiSummaryService(MovieService movieService, GeminiClient geminiClient) {
+    public AiSummaryService(MovieService movieService, GeminiClient geminiClient, AiSummaryRepository aiSummaryRepository) {
         this.movieService = movieService;
         this.geminiClient = geminiClient;
+        this.aiSummaryRepository = aiSummaryRepository;
     }
 
     public String summarize(String id) {
-        return cache.computeIfAbsent(id, this::generate);
+        return cache.computeIfAbsent(id, this::loadOrGenerate);
+    }
+
+    private String loadOrGenerate(String id) {
+        return aiSummaryRepository.findById(id)
+                .map(AiSummary::getSummary)
+                .orElseGet(() -> {
+                    String summary = generate(id);
+                    aiSummaryRepository.save(new AiSummary(id, summary));
+                    return summary;
+                });
     }
 
     private String generate(String id) {

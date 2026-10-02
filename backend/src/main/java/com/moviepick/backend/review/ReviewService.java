@@ -65,6 +65,13 @@ public class ReviewService {
                 ));
     }
 
+    // 홈 화면 "지금 인기 있는 영화" - 평균 평점이 minScore 이상인 영화를 평점 높은 순으로 돌려줍니다(고정 제목 목록 없음).
+    public List<TopRatedMovie> getTopRatedMovies(double minScore) {
+        return reviewRepository.findTopRated(minScore).stream()
+                .map(row -> new TopRatedMovie(row.getMovieId(), row.getAverageScore(), row.getReviewCount()))
+                .toList();
+    }
+
     private Review requireOwnedReview(String movieId, Long reviewId, Long userId) {
         Review review = reviewRepository.findById(reviewId)
                 .filter(candidate -> candidate.getMovieId().equals(movieId))

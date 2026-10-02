@@ -1,20 +1,21 @@
 import { useEffect, useState } from 'react'
-import { getReservedSeats } from '../../api/bookingApi'
+import { getScreenings, getScreeningSeats } from '../../api/screeningApi'
 import { getNowShowing } from '../../api/movieApi'
-import { getBookingDates, SEATS_PER_ROW, SEAT_ROWS, SHOWTIMES, THEATERS } from '../Booking/bookingData'
 import StatCard from './components/StatCard'
 
-const TOTAL_SEATS = SEAT_ROWS.length * SEATS_PER_ROW
-const DATES = getBookingDates()
+function toHourMinute(timeStr) {
+  return timeStr.slice(0, 5)
+}
 
-// 회차(SHOWTIMES)별로 실제 예약된 좌석을 백엔드(bookings 테이블)에서 조회해 예매 현황을 보여줍니다.
+// 상영관/날짜/회차별 실제 좌석 상태(screenings/seats 테이블)를 조회해 예매 현황을 보여줍니다.
 // 영화 목록은 사용자 예매 탭(BookingListPage)과 완전히 같은 "현재 상영중인 영화"를 그대로 씁니다.
 function AdminScreeningsPage() {
   const [movies, setMovies] = useState([])
   const [moviesStatus, setMoviesStatus] = useState('loading') // loading | ready | error
-  const [selectedDate, setSelectedDate] = useState(DATES[0].value)
   const [selectedMovieId, setSelectedMovieId] = useState('')
-  const [selectedTheater, setSelectedTheater] = useState(THEATERS[0])
+  const [screenings, setScreenings] = useState([])
+  const [selectedTheater, setSelectedTheater] = useState('')
+  const [selectedDate, setSelectedDate] = useState('')
   const [occupancy, setOccupancy] = useState([])
   const [occupancyStatus, setOccupancyStatus] = useState('idle') // idle | loading | ready | error
 
@@ -41,13 +42,50 @@ function AdminScreeningsPage() {
   useEffect(() => {
     if (!selectedMovieId) return undefined
     let cancelled = false
+    getScreenings(selectedMovieId).then((list) => {
+      if (cancelled) return
+      setScreenings(list)
+      const firstTheater = [...new Set(list.map((s) => s.theaterName))].sort()[0] ?? ''
+      setSelectedTheater(firstTheater)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [selectedMovieId])
+
+  const theaterOptions = [...new Set(screenings.map((s) => s.theaterName))].sort()
+  const dateOptions = [...new Set(screenings.filter((s) => s.theaterName === selectedTheater).map((s) => s.date))].sort()
+
+  useEffect(() => {
+    if (dateOptions.length === 0) {
+      if (selectedDate !== '') setSelectedDate('')
+      return
+    }
+    if (!dateOptions.includes(selectedDate)) {
+      setSelectedDate(dateOptions[0])
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedTheater, screenings])
+
+  const matchingScreenings = screenings
+    .filter((s) => s.theaterName === selectedTheater && s.date === selectedDate)
+    .sort((a, b) => a.startTime.localeCompare(b.startTime))
+
+  useEffect(() => {
+    if (matchingScreenings.length === 0) {
+      setOccupancy([])
+      return undefined
+    }
+    let cancelled = false
     setOccupancyStatus('loading')
 
     Promise.all(
-      SHOWTIMES.map((showtime) =>
-        getReservedSeats({ movieId: selectedMovieId, theater: selectedTheater, showDate: selectedDate, showtime }).then(
-          (dto) => ({ showtime, seats: dto.seats }),
-        ),
+      matchingScreenings.map((screening) =>
+        getScreeningSeats(screening.id).then((seats) => ({
+          showtime: toHourMinute(screening.startTime),
+          totalSeats: seats.length,
+          bookedSeats: seats.filter((seat) => seat.status === 'BOOKED'),
+        })),
       ),
     )
       .then((rows) => {
@@ -63,10 +101,11 @@ function AdminScreeningsPage() {
     return () => {
       cancelled = true
     }
-  }, [selectedMovieId, selectedTheater, selectedDate])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedTheater, selectedDate, screenings])
 
-  const totalReserved = occupancy.reduce((sum, row) => sum + row.seats.length, 0)
-  const totalCapacity = TOTAL_SEATS * SHOWTIMES.length
+  const totalReserved = occupancy.reduce((sum, row) => sum + row.bookedSeats.length, 0)
+  const totalCapacity = occupancy.reduce((sum, row) => sum + row.totalSeats, 0)
   const occupancyRate = totalCapacity > 0 ? Math.round((totalReserved / totalCapacity) * 100) : 0
 
   return (
@@ -77,18 +116,6 @@ function AdminScreeningsPage() {
       </p>
 
       <div className="mt-6 flex flex-wrap gap-3">
-        <select
-          value={selectedDate}
-          onChange={(event) => setSelectedDate(event.target.value)}
-          className="rounded-lg bg-slate-900 px-3 py-2 text-sm text-gray-200 focus:outline-none"
-        >
-          {DATES.map((date) => (
-            <option key={date.value} value={date.value}>
-              {date.label}
-            </option>
-          ))}
-        </select>
-
         <select
           value={selectedMovieId}
           onChange={(event) => setSelectedMovieId(event.target.value)}
@@ -107,28 +134,49 @@ function AdminScreeningsPage() {
         <select
           value={selectedTheater}
           onChange={(event) => setSelectedTheater(event.target.value)}
+          disabled={theaterOptions.length === 0}
           className="rounded-lg bg-slate-900 px-3 py-2 text-sm text-gray-200 focus:outline-none"
         >
-          {THEATERS.map((theater) => (
+          {theaterOptions.length === 0 && <option>상영 일정 없음</option>}
+          {theaterOptions.map((theater) => (
             <option key={theater} value={theater}>
               {theater}
+            </option>
+          ))}
+        </select>
+
+        <select
+          value={selectedDate}
+          onChange={(event) => setSelectedDate(event.target.value)}
+          disabled={dateOptions.length === 0}
+          className="rounded-lg bg-slate-900 px-3 py-2 text-sm text-gray-200 focus:outline-none"
+        >
+          {dateOptions.length === 0 && <option>상영 일정 없음</option>}
+          {dateOptions.map((date) => (
+            <option key={date} value={date}>
+              {date}
             </option>
           ))}
         </select>
       </div>
 
       <div className="mt-6 flex gap-4">
-        <StatCard label="전체 좌석(전 회차 합계)" value={`${totalCapacity}석`} />
+        <StatCard label="전체 좌석(선택한 날짜 전 회차 합계)" value={`${totalCapacity}석`} />
         <StatCard label="예매된 좌석" value={`${totalReserved}석`} />
         <StatCard label="예매율" value={`${occupancyRate}%`} />
       </div>
 
       <div className="mt-6 rounded-xl bg-slate-900/60 p-4">
-        {occupancyStatus === 'loading' && <p className="text-sm text-gray-400">예매 현황을 불러오는 중...</p>}
+        {matchingScreenings.length === 0 && (
+          <p className="text-sm text-gray-400">이 영화는 선택한 상영관/날짜에 상영 일정이 없습니다.</p>
+        )}
+        {matchingScreenings.length > 0 && occupancyStatus === 'loading' && (
+          <p className="text-sm text-gray-400">예매 현황을 불러오는 중...</p>
+        )}
         {occupancyStatus === 'error' && (
           <p className="text-sm text-red-400">예매 현황을 불러오지 못했습니다. 다시 시도해주세요.</p>
         )}
-        {occupancyStatus === 'ready' && (
+        {occupancyStatus === 'ready' && occupancy.length > 0 && (
           <table className="w-full text-left text-sm">
             <thead>
               <tr className="border-b border-white/10 text-gray-400">
@@ -143,10 +191,16 @@ function AdminScreeningsPage() {
                 <tr key={row.showtime} className="border-b border-white/5 last:border-0">
                   <td className="py-3 font-semibold text-white">{row.showtime}</td>
                   <td className="py-3 text-gray-300">
-                    {row.seats.length} / {TOTAL_SEATS}
+                    {row.bookedSeats.length} / {row.totalSeats}
                   </td>
-                  <td className="py-3 text-gray-300">{Math.round((row.seats.length / TOTAL_SEATS) * 100)}%</td>
-                  <td className="py-3 text-gray-400">{row.seats.length > 0 ? row.seats.join(', ') : '-'}</td>
+                  <td className="py-3 text-gray-300">
+                    {row.totalSeats > 0 ? Math.round((row.bookedSeats.length / row.totalSeats) * 100) : 0}%
+                  </td>
+                  <td className="py-3 text-gray-400">
+                    {row.bookedSeats.length > 0
+                      ? row.bookedSeats.map((seat) => `${seat.rowLabel}${seat.colNo}`).join(', ')
+                      : '-'}
+                  </td>
                 </tr>
               ))}
             </tbody>

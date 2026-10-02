@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../auth/AuthContext'
 import AuthShell from './components/AuthShell'
+import FindPasswordDialog from './components/FindPasswordDialog'
 
 function LoginPage() {
   const { login } = useAuth()
@@ -10,6 +11,7 @@ function LoginPage() {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
+  const [showFindPassword, setShowFindPassword] = useState(false)
 
   const goAfterLogin = (user) => {
     if (user.isAdmin) {
@@ -70,7 +72,7 @@ function LoginPage() {
             <input type="checkbox" className="rounded border-slate-300" />
             로그인 상태 유지
           </label>
-          <button type="button" className="text-indigo-600 hover:underline">
+          <button type="button" onClick={() => setShowFindPassword(true)} className="text-indigo-600 hover:underline">
             비밀번호 찾기
           </button>
         </div>
@@ -91,6 +93,8 @@ function LoginPage() {
           </Link>
         </p>
       </form>
+
+      {showFindPassword && <FindPasswordDialog onClose={() => setShowFindPassword(false)} />}
     </AuthShell>
   )
 }

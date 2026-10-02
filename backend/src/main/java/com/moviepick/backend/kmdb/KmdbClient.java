@@ -95,7 +95,10 @@ public class KmdbClient {
             if (sort != null && !sort.isBlank()) {
                 uriBuilder.queryParam("sort", sort);
             }
-            uriBuilder.queryParam(fieldName, fieldValue);
+            // 검색어 없이 장르/날짜만으로 찾아볼 때(fieldValue가 빈 값)는 title= 처럼 빈 파라미터를 보내지 않습니다.
+            if (fieldValue != null && !fieldValue.isBlank()) {
+                uriBuilder.queryParam(fieldName, fieldValue);
+            }
             if (genre != null && !genre.isBlank()) {
                 uriBuilder.queryParam("genre", toKmdbGenreParam(genre));
             }

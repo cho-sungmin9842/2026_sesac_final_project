@@ -1,11 +1,10 @@
 import { useEffect, useState } from 'react'
 import { useAuth } from '../../auth/AuthContext'
-import { getFirstMatches, searchMovies } from '../../api/movieApi'
+import { getPopularMovies, searchMovies } from '../../api/movieApi'
 import { getPreferredGenres } from '../../api/userApi'
 import { genreLabel as translateGenre } from '../MovieList/components/filterOptions'
 import AiRecommendBanner from './components/AiRecommendBanner'
 import MovieSection from './components/MovieSection'
-import { POPULAR_QUERIES } from './curatedQueries'
 
 const GENRE_SEARCH_PAGE_SIZE = 20
 const RECOMMENDED_SECTION_SIZE = 14
@@ -47,7 +46,7 @@ function HomePage() {
 
     getPreferredGenres(user.id)
       .then((dto) =>
-        Promise.all([getFirstMatches(POPULAR_QUERIES), fetchGenreRecommendations(dto.genres)]).then(
+        Promise.all([getPopularMovies(), fetchGenreRecommendations(dto.genres)]).then(
           ([popular, recommended]) => ({ popular, recommended, genres: dto.genres }),
         ),
       )

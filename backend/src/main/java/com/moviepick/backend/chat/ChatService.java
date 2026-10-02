@@ -14,6 +14,8 @@ import com.moviepick.backend.movie.MovieService;
 import com.moviepick.backend.movie.dto.ActorDto;
 import com.moviepick.backend.movie.dto.MovieDetailDto;
 import com.moviepick.backend.movie.dto.MovieSummaryDto;
+import com.moviepick.backend.wishlist.WishlistService;
+import com.moviepick.backend.wishlist.dto.WishlistRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -53,19 +55,22 @@ public class ChatService {
     private final ChatMessageRepository chatMessageRepository;
     private final UserRepository userRepository;
     private final ObjectMapper objectMapper;
+    private final WishlistService wishlistService;
 
     public ChatService(
             GeminiClient geminiClient,
             MovieService movieService,
             ChatMessageRepository chatMessageRepository,
             UserRepository userRepository,
-            ObjectMapper objectMapper
+            ObjectMapper objectMapper,
+            WishlistService wishlistService
     ) {
         this.geminiClient = geminiClient;
         this.movieService = movieService;
         this.chatMessageRepository = chatMessageRepository;
         this.userRepository = userRepository;
         this.objectMapper = objectMapper;
+        this.wishlistService = wishlistService;
     }
 
     // 저장된 대화 내역을 시간순으로 돌려줍니다. 추천 메시지는 movie_ids로 KMDB 상세를 다시 조회해
@@ -109,6 +114,19 @@ public class ChatService {
                 .orElseThrow(() -> new ApiException("로그인이 필요합니다.", HttpStatus.UNAUTHORIZED));
 
         List<ChatMessage> fullHistory = chatMessageRepository.findByUserIdOrderByCreatedAtAsc(userId);
+
+        // "찜해줘"는 Gemini 판단이 필요 없는 결정적 동작이라, 조건 추출 자체를 거치지 않고 바로 처리합니다.
+        if (WISHLIST_HINT.matcher(request.message()).find()) {
+            return handleWishlistRequest(user, request.message(), fullHistory);
+        }
+
+        // "지금 상영중인 영화" 요청도 Gemini의 ExtractedFilter(연도 전체 단위 필터만 있고 "최근 개봉일자
+        // 범위" 개념이 없음)로는 제대로 답할 수 없어서, 예매 화면과 같은 실제 "상영중" 로직(MovieService.
+        // getNowShowing, 최근 4주 개봉작)으로 바로 처리합니다.
+        if (NOW_SHOWING_HINT.matcher(request.message()).find()) {
+            return handleNowShowingRequest(user, request.message());
+        }
+
         List<GeminiClient.ChatTurn> history = toGeminiTurns(lastN(fullHistory, MAX_HISTORY_TURNS_FOR_EXTRACTION));
         ExtractedFilter filter = extractFilter(history, request.message());
         // 대화가 어떤 영화 얘기로 길게 이어진 뒤라, "배우 OOO 출연작 알려줘"처럼 명백한 새 요청도 Gemini가
@@ -143,9 +161,13 @@ public class ChatService {
 
         // "이 영화와 같은 장르로"처럼 이전에 나온 영화를 기준 삼으라고 했으면, Gemini에게 그 영화의 장르를
         // 다시 "기억해내라"고 시키는 대신 그 영화를 직접 재조회해서 실제 장르를 가져옵니다(훨씬 안정적입니다).
-        ExtractedFilter effectiveFilter = resolveReferenceGenre(filter);
+        ExtractedFilter effectiveFilter = resolveReferenceGenre(filter, fullHistory);
 
-        List<MovieSummaryDto> candidates = findCandidates(effectiveFilter);
+        // "같은 장르의 영화들을 추천해줘"처럼 이어가는 요청이 방금 봤던 영화를 그대로 다시 추천해버리는
+        // 문제(예: 액션 2편 추천 -> "같은 장르로" -> 그 2편이 6편 중 그대로 다시 포함) - 이번 대화에서
+        // 이미 추천했던 영화는 다시 후보에 넣지 않습니다.
+        java.util.Set<String> alreadyRecommendedIds = alreadyRecommendedMovieIds(fullHistory);
+        List<MovieSummaryDto> candidates = findCandidates(effectiveFilter, alreadyRecommendedIds);
         String reply = candidates.isEmpty()
                 ? "말씀하신 조건에 맞는 국내 영화를 찾지 못했어요. 장르나 연도 조건을 조금 완화해서 다시 물어봐주시겠어요?"
                 : buildReply(effectiveFilter, candidates);
@@ -153,19 +175,72 @@ public class ChatService {
         return persistTurn(user, request.message(), reply, candidates);
     }
 
-    private ExtractedFilter resolveReferenceGenre(ExtractedFilter filter) {
+    private ExtractedFilter resolveReferenceGenre(ExtractedFilter filter, List<ChatMessage> fullHistory) {
         if (filter.genre() != null || filter.referenceTitle() == null) {
             return filter;
         }
-        List<MovieSummaryDto> matches =
-                movieService.search(filter.referenceTitle(), List.of(), null, "latest", 1, 1, "title").movies();
-        if (matches.isEmpty() || matches.get(0).genres().isEmpty()) {
+        String resolvedGenre = resolveGenreFromLastRecommendation(filter.referenceTitle(), fullHistory)
+                .orElseGet(() -> resolveGenreByTitleSearch(filter.referenceTitle()));
+        if (resolvedGenre == null) {
             return filter;
         }
-        String resolvedGenre = matches.get(0).genres().get(0);
         return new ExtractedFilter(
                 filter.intent(), resolvedGenre, filter.year(), filter.runtimeMaxMinutes(),
                 filter.query(), filter.queryField(), filter.referenceTitle(), filter.count());
+    }
+
+    // referenceTitle이 직전 AI 추천 목록에 실제로 있었던 영화라면, 그 영화 한 편의 여러 장르 태그 중
+    // 아무거나(예: KMDB가 나열한 첫 번째) 고르는 대신, 그 목록 전체가 "공통으로" 가진 장르를 이어갑니다.
+    // (예: "액션"으로 추천받았던 "한복 입은 남자"의 KMDB 장르 순서가 "드라마,액션,SF,..."라서, 첫 번째만
+    // 보면 엉뚱하게 "드라마"로 새겨버립니다 - 실제로 그 추천에 쓰인 조건은 액션이었는데도.) 추천 목록의
+    // 모든 영화에 공통으로 붙어있는 장르는 그 추천이 실제로 사용한 조건일 가능성이 매우 높습니다.
+    private java.util.Optional<String> resolveGenreFromLastRecommendation(String referenceTitle, List<ChatMessage> fullHistory) {
+        for (int i = fullHistory.size() - 1; i >= 0; i--) {
+            ChatMessage message = fullHistory.get(i);
+            if (!"ai".equals(message.getRole()) || message.getMovieIds() == null || message.getMovieIds().isBlank()) {
+                continue;
+            }
+            List<MovieSummaryDto> recommended = moviesFrom(message.getMovieIds());
+            boolean containsReferenceTitle = recommended.stream()
+                    .anyMatch(movie -> titleMatches(movie.title(), referenceTitle));
+            if (!containsReferenceTitle) {
+                continue;
+            }
+            java.util.LinkedHashSet<String> commonGenres = null;
+            for (MovieSummaryDto movie : recommended) {
+                java.util.LinkedHashSet<String> genres = new java.util.LinkedHashSet<>(movie.genres());
+                commonGenres = commonGenres == null ? genres : intersect(commonGenres, genres);
+            }
+            return commonGenres != null && !commonGenres.isEmpty()
+                    ? java.util.Optional.of(commonGenres.iterator().next())
+                    : java.util.Optional.empty();
+        }
+        return java.util.Optional.empty();
+    }
+
+    private java.util.LinkedHashSet<String> intersect(java.util.LinkedHashSet<String> a, java.util.LinkedHashSet<String> b) {
+        a.retainAll(b);
+        return a;
+    }
+
+    // KMDB 표기 띄어쓰기 차이(예: "퍼펙트게임" vs "퍼펙트 게임")에 영향받지 않도록 공백을 무시하고 비교합니다.
+    private boolean titleMatches(String movieTitle, String referenceTitle) {
+        if (movieTitle == null || referenceTitle == null) {
+            return false;
+        }
+        return movieTitle.replaceAll("\\s+", "").equalsIgnoreCase(referenceTitle.replaceAll("\\s+", ""));
+    }
+
+    // referenceTitle이 직전 추천 목록에 없었을 때(예: movie_question으로 영화 한 편만 얘기하다가 "이 영화와
+    // 같은 장르로 추천해줘"라고 이어간 경우)의 기존 방식 - 공통 장르를 계산할 목록 자체가 없으므로, 그 영화를
+    // 다시 조회해 첫 번째 장르 태그를 대표 장르로 씁니다.
+    private String resolveGenreByTitleSearch(String referenceTitle) {
+        List<MovieSummaryDto> matches =
+                movieService.search(referenceTitle, List.of(), null, "latest", 1, 1, "title").movies();
+        if (matches.isEmpty() || matches.get(0).genres().isEmpty()) {
+            return null;
+        }
+        return matches.get(0).genres().get(0);
     }
 
     // ---- 특정 영화에 대한 질문(장르/배우/감독/줄거리 등) ----
@@ -235,6 +310,10 @@ public class ChatService {
                   null로 둔다).
                 - referenceTitle: "이 영화와 같은 장르로", "그거랑 비슷하게"처럼 이전에 나온 특정 영화를
                   기준으로 삼으라는 요청이면 그 영화의 실제 제목(대명사를 이전 메시지에서 찾아 채워라).
+                  **직전 답변이 특정 영화 하나에 대한 게 아니라 장르 조건으로 여러 편을 추천한 목록이었을
+                  때도 마찬가지다** - "같은 장르의 영화들을 추천해줘"처럼 영화 제목을 콕 집지 않고 그냥
+                  "같은 장르로" 이어가 달라는 요청이면, 직전 AI 답변이 추천했던 영화 목록의 첫 번째 영화
+                  제목을 referenceTitle로 채워라(그 영화를 다시 조회해서 실제 장르를 알아내 이어간다).
                   기준으로 삼을 영화가 없으면 null. genre 값 자체를 여기서 추측하지 말고 제목만 채워라
                   (실제 장르는 서버가 그 영화를 직접 다시 조회해서 알아낸다).
                 - genre: recommend이고 사용자가 장르명을 "직접" 말했을 때만 채운다(목록 중 하나).
@@ -275,6 +354,8 @@ public class ChatService {
                   {"intent":"recommend","referenceTitle":null,"genre":null,"query":"좀비","queryField":"keyword","year":null,"count":null}
                 - "실제 범죄 내용을 스토리로 한 영화를 2개 추천해줘" ->
                   {"intent":"recommend","referenceTitle":null,"genre":"범죄","query":null,"queryField":null,"year":null,"count":2}
+                - (직전 답변이 액션 장르로 "한복 입은 남자" 등 여러 편을 추천한 목록이었던 상황) "같은
+                  장르의 영화들을 추천해줘" -> {"intent":"recommend","referenceTitle":"한복 입은 남자","genre":null,"query":null,"year":null,"count":null}
                 - "오늘 날씨 어때?" / "너는 이름이 뭐야?" / "1 더하기 1은?" ->
                   {"intent":"off_topic","referenceTitle":null,"genre":null,"query":null,"queryField":null,"year":null,"count":null}
                 """.formatted(LocalDate.now());
@@ -355,7 +436,7 @@ public class ChatService {
 
     // ---- 2) KMDB에서 실제 후보 찾기 ----
 
-    private List<MovieSummaryDto> findCandidates(ExtractedFilter filter) {
+    private List<MovieSummaryDto> findCandidates(ExtractedFilter filter, java.util.Set<String> excludeMovieIds) {
         List<String> genres = filter.genre() == null ? List.of() : List.of(filter.genre());
         // 사용자가 "2개", "3편"처럼 개수를 직접 말했으면 그 개수를(최대 MAX_RECOMMENDATIONS까지), 아니면
         // 기본 개수를 씁니다.
@@ -381,8 +462,21 @@ public class ChatService {
 
         return movies.stream()
                 .filter(movie -> matchesRuntime(movie, filter.runtimeMaxMinutes()))
+                .filter(movie -> !excludeMovieIds.contains(movie.id()))
                 .limit(limit)
                 .toList();
+    }
+
+    // 이 대화(user)에서 지금까지 AI가 실제로 추천했던 영화 id를 전부 모읍니다(움직이는 창 없이 저장된
+    // 전체 기록 기준 - 조건 추출용 history와 달리 "화면에서 이미 본 카드를 또 보여주지 않기" 목적이라
+    // 대화가 아무리 길어도 전부 확인해야 합니다).
+    private java.util.Set<String> alreadyRecommendedMovieIds(List<ChatMessage> fullHistory) {
+        return fullHistory.stream()
+                .filter(message -> "ai".equals(message.getRole()) && message.getMovieIds() != null && !message.getMovieIds().isBlank())
+                .flatMap(message -> Arrays.stream(message.getMovieIds().split(",")))
+                .map(String::trim)
+                .filter(id -> !id.isEmpty())
+                .collect(Collectors.toSet());
     }
 
     private int resolveLimit(Integer requestedCount) {
@@ -513,8 +607,49 @@ public class ChatService {
                 filter.query(), filter.queryField(), filter.referenceTitle(), count);
     }
 
+    private static final java.util.regex.Pattern WISHLIST_HINT = java.util.regex.Pattern.compile("찜");
+
+    // "이 영화 찜해줘"처럼 직전에 추천받은 영화를 찜 목록에 담아달라는 요청은 판단이 필요한 게 아니라 그냥
+    // 실행하면 되는 결정적인 동작이라, Gemini에게 물어보지 않고 정규식으로 바로 처리합니다(API 호출도
+    // 아끼고, "장르가 뭐야" 같은 recommend/movie_question 분류로 잘못 새는 것도 원천 차단됩니다).
+    private ChatResponseDto handleWishlistRequest(User user, String userMessage, List<ChatMessage> fullHistory) {
+        List<MovieSummaryDto> movies = lastRecommendedMovies(fullHistory);
+        if (movies.isEmpty()) {
+            String reply = "먼저 추천받은 영화가 있어야 찜할 수 있어요! 어떤 영화를 찾아드릴까요?";
+            return persistTurn(user, userMessage, reply, List.of());
+        }
+        for (MovieSummaryDto movie : movies) {
+            wishlistService.add(user.getId(), new WishlistRequest(movie.id(), movie.title(), movie.posterUrl()));
+        }
+        String titles = movies.stream().map(MovieSummaryDto::title).collect(Collectors.joining(", "));
+        String reply = "%s %s 찜했습니다."
+                .formatted(titles, movies.size() > 1 ? "등 %d편을".formatted(movies.size()) : "을(를)");
+        // 찜하기 확인 메시지에는 영화 카드 목록을 다시 붙이지 않습니다 - movies를 그대로 넘기면
+        // ChatMovieRecommendation이 방금 봤던 추천 카드 그리드를 통째로 다시 그려서, 화면상 방금 추천
+        // 답변과 거의 구분이 안 되는 문제가 있었습니다(사용자가 "안 고쳐졌다"고 재차 신고한 원인).
+        return persistTurn(user, userMessage, reply, List.of());
+    }
+
+    private static final java.util.regex.Pattern NOW_SHOWING_HINT = java.util.regex.Pattern.compile("상영\\s*중");
+
+    // "지금 상영중인 영화 찾아줘"도 Gemini의 ExtractedFilter로는 답할 수 없는 요청입니다 - year는 "그 해
+    // 전체"만 표현할 수 있지 "최근 개봉일자 범위(상영중)" 개념이 없어서, 이 요청도 조건 추출을 거치지 않고
+    // 예매 화면의 "상영중인 영화" 목록과 같은 기준(MovieService.getNowShowing, 최근 4주 개봉작)으로 바로
+    // 답합니다.
+    private ChatResponseDto handleNowShowingRequest(User user, String userMessage) {
+        List<MovieSummaryDto> movies = movieService.getNowShowing(MAX_RECOMMENDATIONS).movies();
+        if (movies.isEmpty()) {
+            String reply = "지금 상영중인 국내 영화를 찾지 못했어요.";
+            return persistTurn(user, userMessage, reply, List.of());
+        }
+        String titles = movies.stream().map(MovieSummaryDto::title).collect(Collectors.joining(", "));
+        String reply = "지금 상영중인 영화로 %s %s 찾았어요! 마음에 드는 작품을 골라보세요 🍿\n영화 포스터를 클릭하시면 자세한 영화 정보를 보실 수 있습니다."
+                .formatted(titles, movies.size() > 1 ? "등 %d편을".formatted(movies.size()) : "을(를)");
+        return persistTurn(user, userMessage, reply, movies);
+    }
+
     private static final java.util.regex.Pattern MORE_HINT =
-            java.util.regex.Pattern.compile("더\\s*추천|더\\s*보여|또\\s*추천|비슷한|다른\\s*(?:걸로|거|영화|것)");
+            java.util.regex.Pattern.compile("더\\s*추천|더\\s*보여|또\\s*추천|비슷한|같은\\s*장르|다른\\s*(?:걸로|거|영화|것)");
 
     // Gemini 추출 결과가 완전히 비어있는데(장르/연도/검색어/기준영화 전부 null) "더 추천해줘"/"비슷한 걸로"처럼
     // 특정 영화를 다시 짚지 않고 이어달라고만 한 경우, 직전에 실제로 추천했던 영화 하나를 referenceTitle로
@@ -558,6 +693,18 @@ public class ChatService {
             }
         }
         return null;
+    }
+
+    // 가장 최근에 실제로 영화를 추천했던 AI 메시지가 추천한 영화 전체 목록을 찾습니다("이 영화 찜해줘"처럼
+    // 방금 추천받은 여러 편을 한꺼번에 가리키는 요청에 씁니다).
+    private List<MovieSummaryDto> lastRecommendedMovies(List<ChatMessage> fullHistory) {
+        for (int i = fullHistory.size() - 1; i >= 0; i--) {
+            ChatMessage message = fullHistory.get(i);
+            if ("ai".equals(message.getRole()) && message.getMovieIds() != null && !message.getMovieIds().isBlank()) {
+                return moviesFrom(message.getMovieIds());
+            }
+        }
+        return List.of();
     }
 
     private String stripTrailingParticle(String name) {

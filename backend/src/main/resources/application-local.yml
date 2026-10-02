@@ -2,7 +2,8 @@
 # 아래 service-key 값에 KMDB에서 발급받은 ServiceKey를 그대로 붙여넣으세요.
 kmdb:
   service-key: kmdb_api_key
-
+  
 # AI 추천 채팅에 쓸 Gemini API 키. https://aistudio.google.com/apikey 에서 무료로 발급받아 붙여넣으세요.
 gemini:
   api-key: gemini_api_key
+

@@ -23,6 +23,16 @@ public interface ReviewRepository extends JpaRepository<Review, Long> {
             """)
     List<MovieRatingRow> aggregateRatings(@Param("movieIds") Collection<String> movieIds);
 
+    // 홈 화면 "지금 인기 있는 영화" - 고정된 제목 목록이 아니라, 실제 평균 평점이 기준 이상인 영화를 평점 높은 순으로 찾습니다.
+    @Query("""
+            select r.movieId as movieId, avg(r.score) as averageScore, count(r) as reviewCount
+            from Review r
+            group by r.movieId
+            having avg(r.score) >= :minScore
+            order by avg(r.score) desc, count(r) desc
+            """)
+    List<MovieRatingRow> findTopRated(@Param("minScore") double minScore);
+
     interface MovieRatingRow {
         String getMovieId();
 

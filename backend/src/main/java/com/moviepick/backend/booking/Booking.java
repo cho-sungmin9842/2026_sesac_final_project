@@ -14,14 +14,15 @@ import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import lombok.Getter;
 
-import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
-import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Set;
-import java.util.stream.Collectors;
 
+/**
+ * 영화 예매 1건. 상영관/날짜/시간/영화 정보는 문자열로 중복 저장하지 않고 screeningId 하나로만 연결합니다
+ * (screenings를 movies/theaters와 조인하면 전부 구할 수 있습니다 - 다른 도메인의 movie_id 컬럼들과
+ * 동일하게, Screening을 JPA 관계가 아니라 평범한 id 컬럼으로 참조합니다).
+ */
 @Entity
 @Table(name = "bookings")
 @Getter
@@ -35,24 +36,12 @@ public class Booking {
     @JoinColumn(name = "user_id", nullable = false)
     private User user;
 
-    @Column(name = "movie_id", nullable = false, length = 64)
-    private String movieId;
-
-    @Column(name = "movie_title", nullable = false, length = 255)
-    private String movieTitle;
-
-    @Column(nullable = false, length = 50)
-    private String theater;
-
-    @Column(name = "show_date", nullable = false)
-    private LocalDate showDate;
-
-    @Column(nullable = false, length = 10)
-    private String showtime;
+    @Column(name = "screening_id", nullable = false)
+    private Long screeningId;
 
     @ElementCollection(fetch = FetchType.EAGER)
     @CollectionTable(name = "booking_seats", joinColumns = @JoinColumn(name = "booking_id"))
-    private List<SeatSelection> seats = new ArrayList<>();
+    private List<BookingSeat> seats = new ArrayList<>();
 
     @Column(name = "total_price", nullable = false)
     private int totalPrice;
@@ -63,29 +52,11 @@ public class Booking {
     protected Booking() {
     }
 
-    public Booking(
-            User user,
-            String movieId,
-            String movieTitle,
-            String theater,
-            LocalDate showDate,
-            String showtime,
-            List<SeatSelection> seats,
-            int totalPrice
-    ) {
+    public Booking(User user, Long screeningId, List<BookingSeat> seats, int totalPrice) {
         this.user = user;
-        this.movieId = movieId;
-        this.movieTitle = movieTitle;
-        this.theater = theater;
-        this.showDate = showDate;
-        this.showtime = showtime;
+        this.screeningId = screeningId;
         this.seats = new ArrayList<>(seats);
         this.totalPrice = totalPrice;
         this.createdAt = LocalDateTime.now();
-    }
-
-    // 좌석 코드만 필요한 곳(중복 예약 검사, 목록 응답 등)에서 쓰는 편의 메서드입니다.
-    public Set<String> seatCodes() {
-        return seats.stream().map(SeatSelection::getSeatCode).collect(Collectors.toCollection(LinkedHashSet::new));
     }
 }

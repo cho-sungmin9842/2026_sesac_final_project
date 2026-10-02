@@ -11,6 +11,7 @@ import com.moviepick.backend.movie.dto.MovieSearchResultDto;
 import com.moviepick.backend.movie.dto.MovieSummaryDto;
 import com.moviepick.backend.review.RatingSummary;
 import com.moviepick.backend.review.ReviewService;
+import com.moviepick.backend.review.TopRatedMovie;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
@@ -23,6 +24,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
+import java.util.stream.Collectors;
 
 @Service
 public class MovieService {
@@ -37,11 +40,21 @@ public class MovieService {
     private final KmdbClient kmdbClient;
     private final MovieMapper movieMapper;
     private final ReviewService reviewService;
+    private final MovieCacheService movieCacheService;
+    private final NowShowingSnapshotRepository nowShowingSnapshotRepository;
 
-    public MovieService(KmdbClient kmdbClient, MovieMapper movieMapper, ReviewService reviewService) {
+    public MovieService(
+            KmdbClient kmdbClient,
+            MovieMapper movieMapper,
+            ReviewService reviewService,
+            MovieCacheService movieCacheService,
+            NowShowingSnapshotRepository nowShowingSnapshotRepository
+    ) {
         this.kmdbClient = kmdbClient;
         this.movieMapper = movieMapper;
         this.reviewService = reviewService;
+        this.movieCacheService = movieCacheService;
+        this.nowShowingSnapshotRepository = nowShowingSnapshotRepository;
     }
 
     public MovieSearchResultDto search(String query, List<String> genres, String year, String sort, int page, int pageSize, String field) {
@@ -175,14 +188,46 @@ public class MovieService {
     }
 
     // 예매 화면의 "상영중인 영화" 목록 - 실제 상영 스케줄 API가 없어서, 최근 4주 내 개봉일자(releaseDts~releaseDte)로
-    // 대신합니다. 접속 시점 기준으로 매번 계산하므로 별도 배치/스케줄러 없이 항상 최신 범위를 봅니다.
+    // 대신합니다. 접속 날짜 기준으로 하루에 한 번만 계산해 DB에 스냅샷으로 저장해두고, 같은 날 재방문 시에는
+    // KMDB를 다시 부르지 않고 이 스냅샷(과 movies 캐시)에서 그대로 읽습니다.
     public MovieSearchResultDto getNowShowing(int listCount) {
+        List<MovieSummaryDto> movies = getOrCreateTodayShowingMovies();
+        int totalCount = movies.size();
+        List<MovieSummaryDto> limited = movies.size() > listCount ? movies.subList(0, listCount) : movies;
+        return new MovieSearchResultDto(limited, 1, listCount, totalCount, totalCount == 0 ? 0 : 1);
+    }
+
+    // getNowShowing()과 상영정보 자동 생성 배치(ScreeningGenerationService)가 공통으로 쓰는, 오늘 날짜 기준
+    // "상영중" 영화 전체 목록입니다. 오늘 스냅샷이 이미 있으면 그대로 재사용하고, 없으면(그날 첫 조회) KMDB로
+    // 계산해서 스냅샷에 저장합니다 - 같은 날에는 어느 쪽에서 먼저 호출하든 KMDB 호출이 하루 한 번으로 줄어듭니다.
+    public List<MovieSummaryDto> getOrCreateTodayShowingMovies() {
         LocalDate today = LocalDate.now();
+        List<NowShowingSnapshot> snapshot = nowShowingSnapshotRepository.findBySnapshotDateOrderByDisplayOrderAsc(today);
+
+        if (!snapshot.isEmpty()) {
+            List<String> movieIds = snapshot.stream().map(NowShowingSnapshot::getMovieId).toList();
+            Map<String, RatingSummary> ratings = reviewService.getRatingSummaries(movieIds);
+            Map<String, MovieCacheService.MovieSummaryRating> ratingsForCache = ratings.entrySet().stream()
+                    .collect(Collectors.toMap(
+                            Map.Entry::getKey,
+                            entry -> new MovieCacheService.MovieSummaryRating(entry.getValue().averageScore(), (int) entry.getValue().reviewCount())
+                    ));
+            return movieCacheService.findCachedSummariesInOrder(movieIds, ratingsForCache);
+        }
+
         String releaseDte = today.format(KMDB_DATE_FORMAT);
         String releaseDts = today.minusWeeks(4).format(KMDB_DATE_FORMAT);
+        // 날짜마다 실제 개봉작 수(KMDB TotalCount)가 다르므로 고정 건수로 자르지 않고, KMDB 한 번 호출 한도
+        // (KMDB_MAX_LIST_COUNT)까지 요청해서 그날 "상영중"인 영화 전체를 빠짐없이 받아옵니다.
+        FilledPage filled = fetchFilledPage("title", "", null, releaseDts, releaseDte, KMDB_MAX_LIST_COUNT, 0, null);
 
-        FilledPage filled = fetchFilledPage("title", "", null, releaseDts, releaseDte, listCount, 0, null);
-        return new MovieSearchResultDto(filled.movies(), 1, listCount, filled.totalCount(), filled.totalCount() == 0 ? 0 : 1);
+        List<NowShowingSnapshot> toSave = new ArrayList<>();
+        for (int i = 0; i < filled.movies().size(); i++) {
+            toSave.add(new NowShowingSnapshot(today, filled.movies().get(i).id(), i));
+        }
+        nowShowingSnapshotRepository.saveAll(toSave);
+
+        return filled.movies();
     }
 
     private record FilledPage(List<MovieSummaryDto> movies, int totalCount) {
@@ -231,7 +276,7 @@ public class MovieService {
         List<String> movieIds = items.stream().map(movieMapper::toId).toList();
         Map<String, RatingSummary> ratings = reviewService.getRatingSummaries(movieIds);
 
-        return items.stream()
+        List<MovieSummaryDto> summaries = items.stream()
                 .map(item -> {
                     RatingSummary rating = ratings.get(movieMapper.toId(item));
                     return rating == null
@@ -241,17 +286,70 @@ public class MovieService {
                 // 제목이 아예 없는 항목(빈 문자열/공백뿐)은 카드에 보여줄 게 없으니 목록에서 뺍니다.
                 .filter(movie -> movie.title() != null && !movie.title().isBlank())
                 .toList();
+
+        // KMDB에서 받아온 목록 데이터를 movies 캐시에 누적합니다(다음부터는 이 영화들의 상세/재검색이 DB로 서빙됨).
+        movieCacheService.upsertSummaries(summaries);
+        return summaries;
+    }
+
+    // 홈 화면 "지금 인기 있는 영화" - 고정된 영화 제목 목록이 아니라 실제 리뷰 평균 평점이 minScore 이상인 영화를 평점순으로 보여줍니다.
+    public List<MovieSummaryDto> getPopularMovies(double minScore, int limit) {
+        List<TopRatedMovie> topRated = reviewService.getTopRatedMovies(minScore);
+        List<MovieSummaryDto> results = new ArrayList<>();
+
+        for (TopRatedMovie rated : topRated) {
+            if (results.size() >= limit) {
+                break;
+            }
+            String[] parts = rated.movieId().split("_", 2);
+            if (parts.length != 2) {
+                continue;
+            }
+            try {
+                MovieSummaryDto summary = summaryForId(rated.movieId(), parts[0], parts[1], rated.averageScore(), (int) rated.reviewCount());
+                if (summary != null && summary.title() != null && !summary.title().isBlank()) {
+                    results.add(summary);
+                }
+            } catch (Exception ignored) {
+                // KMDB에서 더 이상 찾을 수 없게 된 movieId는 건너뜁니다.
+            }
+        }
+        return results;
+    }
+
+    // 요약 정보는 DB 캐시를 먼저 확인하고, 없을 때만 KMDB를 호출해 새로 캐시에 저장합니다.
+    private MovieSummaryDto summaryForId(String compositeId, String movieId, String movieSeq, Double averageScore, int reviewCount) {
+        return movieCacheService.findCachedSummary(compositeId, averageScore, reviewCount)
+                .orElseGet(() -> {
+                    KmdbMovieItem item = kmdbClient.findByMovieId(movieId, movieSeq).allItems().stream().findFirst().orElse(null);
+                    if (item == null) {
+                        return null;
+                    }
+                    MovieSummaryDto summary = movieMapper.toSummary(item, averageScore, reviewCount);
+                    movieCacheService.upsertSummaries(List.of(summary));
+                    return summary;
+                });
     }
 
     public MovieDetailDto getDetail(String movieId, String movieSeq) {
+        String compositeId = movieId + "_" + movieSeq;
+        RatingSummary rating = reviewService.getRatingSummaries(List.of(compositeId)).get(compositeId);
+        Double averageScore = rating == null ? null : rating.averageScore();
+        int reviewCount = rating == null ? 0 : (int) rating.reviewCount();
+
+        // DB에 상세까지 캐시된 영화는 KMDB를 아예 부르지 않고 그대로 서빙합니다.
+        Optional<MovieDetailDto> cached = movieCacheService.findCachedDetail(compositeId, averageScore, reviewCount);
+        if (cached.isPresent()) {
+            return cached.get();
+        }
+
         List<KmdbMovieItem> items = kmdbClient.findByMovieId(movieId, movieSeq).allItems();
         KmdbMovieItem item = items.stream()
                 .findFirst()
-                .orElseThrow(() -> new ApiException("영화를 찾을 수 없습니다: " + movieId + "_" + movieSeq, HttpStatus.NOT_FOUND));
+                .orElseThrow(() -> new ApiException("영화를 찾을 수 없습니다: " + compositeId, HttpStatus.NOT_FOUND));
 
-        RatingSummary rating = reviewService.getRatingSummaries(List.of(movieMapper.toId(item))).get(movieMapper.toId(item));
-        return rating == null
-                ? movieMapper.toDetail(item)
-                : movieMapper.toDetail(item, rating.averageScore(), (int) rating.reviewCount());
+        MovieDetailDto detail = movieMapper.toDetail(item, averageScore, reviewCount);
+        movieCacheService.upsertDetail(detail);
+        return detail;
     }
 }

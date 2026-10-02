@@ -7,7 +7,8 @@ import MovieDetailPage from './pages/MovieDetail/MovieDetailPage'
 import AiChatPage from './pages/AiChat/AiChatPage'
 import BookingListPage from './pages/Booking/BookingListPage'
 import BookingSeatPage from './pages/Booking/BookingSeatPage'
-import DownloadPage from './pages/Download/DownloadPage'
+import PaymentSuccessPage from './pages/Payment/PaymentSuccessPage'
+import PaymentFailPage from './pages/Payment/PaymentFailPage'
 import MyPage from './pages/MyPage/MyPage'
 import AdminReportsPage from './pages/Admin/AdminReportsPage'
 import AdminScreeningsPage from './pages/Admin/AdminScreeningsPage'
@@ -34,7 +35,8 @@ function App() {
         <Route path="/ai-chat" element={<AiChatPage />} />
         <Route path="/booking" element={<BookingListPage />} />
         <Route path="/booking/:id" element={<BookingSeatPage />} />
-        <Route path="/download" element={<DownloadPage />} />
+        <Route path="/payment/success" element={<PaymentSuccessPage />} />
+        <Route path="/payment/fail" element={<PaymentFailPage />} />
         <Route path="/mypage" element={<MyPage />} />
       </Route>
 

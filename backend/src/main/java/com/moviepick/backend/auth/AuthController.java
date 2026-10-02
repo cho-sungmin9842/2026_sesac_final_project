@@ -1,6 +1,7 @@
 package com.moviepick.backend.auth;
 
 import com.moviepick.backend.auth.dto.LoginRequest;
+import com.moviepick.backend.auth.dto.ResetPasswordRequest;
 import com.moviepick.backend.auth.dto.SignupRequest;
 import com.moviepick.backend.auth.dto.SocialLoginRequest;
 import com.moviepick.backend.auth.dto.UserDto;
@@ -33,5 +34,10 @@ public class AuthController {
     @PostMapping("/social")
     public UserDto socialLogin(@Valid @RequestBody SocialLoginRequest request) {
         return authService.loginOrCreateSocialUser(request.provider());
+    }
+
+    @PostMapping("/reset-password")
+    public void resetPassword(@Valid @RequestBody ResetPasswordRequest request) {
+        authService.resetPassword(request);
     }
 }
