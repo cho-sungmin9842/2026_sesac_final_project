@@ -15,3 +15,10 @@ export function getChatHistory(userId) {
 export function sendChatMessage(userId, message) {
   return request('/api/chat', { method: 'POST', userId, body: { message } })
 }
+
+/**
+ * "새 대화 시작" - 저장된 AI 추천 채팅 내역을 전부 지웁니다.
+ */
+export function clearChatHistory(userId) {
+  return request('/api/chat/history', { method: 'DELETE', userId })
+}

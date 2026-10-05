@@ -10,12 +10,26 @@ export function WishlistProvider({ children }) {
   const { user } = useAuth()
   const [wishlistedIds, setWishlistedIds] = useState(new Set())
 
-  useEffect(() => {
+  // AI 채팅("이 영화 찜해줘")처럼 toggle()을 거치지 않고 서버에 직접 찜이 추가/삭제되는 경로가 있어서,
+  // 로그인 시 한 번만 불러온 뒤로는 그런 변경을 알 방법이 없었습니다(마이페이지에 가도 그때 서버에 실제로
+  // 저장된 찜 목록과 이 화면이 들고 있던 목록이 어긋나, 방금 채팅으로 찜한 영화가 안 보이는 버그가
+  // 있었습니다). 그래서 다시 불러올 수 있는 refresh()를 따로 빼뒀습니다.
+  const refresh = useCallback(() => {
     if (!user) {
       setWishlistedIds(new Set())
-      return
+      return Promise.resolve()
     }
+    return getWishlist(user.id).then((list) => {
+      setWishlistedIds(new Set(list.map((item) => item.movieId)))
+    })
+  }, [user])
+
+  useEffect(() => {
     let cancelled = false
+    if (!user) {
+      setWishlistedIds(new Set())
+      return undefined
+    }
     getWishlist(user.id).then((list) => {
       if (cancelled) return
       setWishlistedIds(new Set(list.map((item) => item.movieId)))
@@ -57,7 +71,7 @@ export function WishlistProvider({ children }) {
     [user, wishlistedIds],
   )
 
-  return <WishlistContext.Provider value={{ wishlistedIds, toggle }}>{children}</WishlistContext.Provider>
+  return <WishlistContext.Provider value={{ wishlistedIds, toggle, refresh }}>{children}</WishlistContext.Provider>
 }
 
 export function useWishlist() {

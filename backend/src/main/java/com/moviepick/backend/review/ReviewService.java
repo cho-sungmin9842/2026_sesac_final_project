@@ -36,6 +36,23 @@ public class ReviewService {
                 .toList();
     }
 
+    // 관리자 "리뷰 신고 관리" 화면 - DB에 저장된 모든 사용자의 리뷰를 전부 조회합니다.
+    public List<ReviewDto> listAllForAdmin(Long adminUserId) {
+        requireAdmin(adminUserId);
+        return reviewRepository.findAllByOrderByCreatedAtDesc().stream()
+                .map(ReviewDto::from)
+                .toList();
+    }
+
+    // 관리자는 작성자가 아니어도 부적절한 리뷰를 삭제할 수 있어야 하므로, 본인 리뷰로만 제한하는
+    // requireOwnedReview()와 별도로 둡니다.
+    public void adminDelete(Long reviewId, Long adminUserId) {
+        requireAdmin(adminUserId);
+        Review review = reviewRepository.findById(reviewId)
+                .orElseThrow(() -> new ApiException("리뷰를 찾을 수 없습니다.", HttpStatus.NOT_FOUND));
+        reviewRepository.delete(review);
+    }
+
     public ReviewDto create(String movieId, Long userId, ReviewRequest request) {
         User user = requireUser(userId);
         Review review = new Review(movieId, request.movieTitle(), user, request.score(), request.content());
@@ -85,5 +102,11 @@ public class ReviewService {
     private User requireUser(Long userId) {
         return userRepository.findById(userId)
                 .orElseThrow(() -> new ApiException("로그인이 필요합니다.", HttpStatus.UNAUTHORIZED));
+    }
+
+    private void requireAdmin(Long userId) {
+        if (!requireUser(userId).isAdmin()) {
+            throw new ApiException("관리자만 이용할 수 있습니다.", HttpStatus.FORBIDDEN);
+        }
     }
 }

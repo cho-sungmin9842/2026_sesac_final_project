@@ -31,3 +31,12 @@ export function deleteReview(movieId, reviewId, userId) {
 export function getMyReviews(userId) {
   return request('/api/reviews/mine', { userId })
 }
+
+// 관리자 "리뷰 신고 관리" 화면 - DB에 저장된 모든 사용자의 리뷰 전체.
+export function getAllReviewsForAdmin(adminUserId) {
+  return request('/api/admin/reviews', { userId: adminUserId })
+}
+
+export function deleteReviewAsAdmin(reviewId, adminUserId) {
+  return request(`/api/admin/reviews/${reviewId}`, { method: 'DELETE', userId: adminUserId })
+}

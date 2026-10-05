@@ -8,16 +8,13 @@ import { getMyBookings } from '../../api/bookingApi'
 import { deleteReview, getMyReviews, updateReview } from '../../api/reviewApi'
 import { getPreferredGenres, updatePreferredGenres } from '../../api/userApi'
 import { getMovieDetail } from '../../api/movieApi'
-import { getChatHistory } from '../../api/chatApi'
-import ChatBubble from '../AiChat/components/ChatBubble'
-import ChatMovieRecommendation from '../AiChat/components/ChatMovieRecommendation'
 import { genreLabel, genres as ALL_GENRES } from '../MovieList/components/filterOptions'
 import MovieCard from '../../components/common/MovieCard'
 import WriteReviewDialog from '../MovieDetail/components/WriteReviewDialog'
 import AiTasteReport from './components/AiTasteReport'
 import ProfileHeader from './components/ProfileHeader'
 
-const TABS = ['예매 내역', '찜한 영화', '시청완료', '내가 쓴 리뷰', 'AI 채팅 기록']
+const TABS = ['예매 내역', '찜한 영화', '시청완료', '내가 쓴 리뷰']
 // "전체"는 필터 전용 옵션이라 개인 취향 선택지에서는 뺍니다.
 const SELECTABLE_GENRES = ALL_GENRES.filter((genre) => genre !== '전체')
 
@@ -137,33 +134,6 @@ function SavedGenresDialog({ onClose }) {
   )
 }
 
-// AI 채팅 화면(ChatBubble/ChatMovieRecommendation)과 똑같은 컴포넌트를 그대로 재사용해서, 실제 대화를
-// 나눴던 화면을 그대로 다시 보는 듯한 말풍선 느낌을 줍니다(마이페이지 전용으로 새로 디자인하지 않음).
-function MyChatHistoryList({ messages, isLoading }) {
-  if (isLoading) {
-    return <p className="text-sm text-gray-500">불러오는 중...</p>
-  }
-  if (messages.length === 0) {
-    return <p className="text-sm text-gray-500">AI 채팅 기록이 아직 없습니다.</p>
-  }
-  return (
-    <div className="space-y-4 rounded-xl bg-slate-950/40 p-4">
-      {messages.map((message, index) => {
-        const from = message.role === 'user' ? 'user' : 'ai'
-        return (
-          <ChatBubble key={index} from={from}>
-            {from === 'ai' && message.movies.length > 0 ? (
-              <ChatMovieRecommendation analysis={message.content} movies={message.movies} />
-            ) : (
-              <span className="whitespace-pre-line">{message.content}</span>
-            )}
-          </ChatBubble>
-        )
-      })}
-    </div>
-  )
-}
-
 function MyBookingList({ bookings, isLoading }) {
   if (isLoading) {
     return <p className="text-sm text-gray-500">불러오는 중...</p>
@@ -241,7 +211,7 @@ function MyReviewList({ reviews, onEdit, onDelete }) {
 
 function MyPage() {
   const { user } = useAuth()
-  const { wishlistedIds } = useWishlist()
+  const { wishlistedIds, refresh: refreshWishlistedIds } = useWishlist()
   const [activeTab, setActiveTab] = useState(TABS[0])
   const [bookings, setBookings] = useState([])
   const [bookingsLoading, setBookingsLoading] = useState(true)
@@ -250,8 +220,6 @@ function MyPage() {
   const [wishlistMovies, setWishlistMovies] = useState([])
   const [watchedMovies, setWatchedMovies] = useState([])
   const [myReviews, setMyReviews] = useState([])
-  const [chatHistory, setChatHistory] = useState([])
-  const [chatHistoryLoading, setChatHistoryLoading] = useState(true)
   const [editingReview, setEditingReview] = useState(null)
   const [preferredGenres, setPreferredGenres] = useState([])
   const [savedGenres, setSavedGenres] = useState([])
@@ -264,6 +232,11 @@ function MyPage() {
 
   useEffect(() => {
     let cancelled = false
+
+    // AI 채팅으로 찜이 추가되는 경우처럼, 로그인 시 한 번 불러온 뒤로 어긋날 수 있는 전역 찜 상태를
+    // 마이페이지에 들어올 때마다 서버 기준으로 다시 맞춥니다(안 그러면 방금 든 getWishlist 결과는 맞아도
+    // 아래 visibleWishlistMovies 필터가 옛 상태로 걸러내 화면엔 안 보이는 문제가 있었습니다).
+    refreshWishlistedIds()
 
     getMyBookings(user.id)
       .then((bookingList) => {
@@ -295,20 +268,10 @@ function MyPage() {
       })
       .catch(() => {})
 
-    getChatHistory(user.id)
-      .then((history) => {
-        if (cancelled) return
-        setChatHistory(history)
-      })
-      .catch(() => {})
-      .finally(() => {
-        if (!cancelled) setChatHistoryLoading(false)
-      })
-
     return () => {
       cancelled = true
     }
-  }, [user.id])
+  }, [user.id, refreshWishlistedIds])
 
   const handleToggleGenre = (genre) => {
     setPreferredGenres((prev) =>
@@ -417,9 +380,6 @@ function MyPage() {
         )}
         {activeTab === '내가 쓴 리뷰' && (
           <MyReviewList reviews={myReviews} onEdit={handleReviewEdit} onDelete={handleReviewDelete} />
-        )}
-        {activeTab === 'AI 채팅 기록' && (
-          <MyChatHistoryList messages={chatHistory} isLoading={chatHistoryLoading} />
         )}
       </div>
 

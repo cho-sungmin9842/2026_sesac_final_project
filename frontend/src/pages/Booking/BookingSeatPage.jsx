@@ -67,6 +67,12 @@ function BookingSeatPage() {
   const [ticketCounts, setTicketCounts] = useState({ adult: 0, teen: 0, child: 0, senior: 0 })
   const [showPaymentWidget, setShowPaymentWidget] = useState(false)
 
+  // 영화 목록에서 "예매"를 눌러 이 페이지로 들어올 때, 이전 페이지의 스크롤 위치가 그대로 남아있어
+  // 화면 중간부터 보이는 문제가 있어 항상 맨 위에서 시작하도록 맞춥니다.
+  useEffect(() => {
+    window.scrollTo(0, 0)
+  }, [id])
+
   useEffect(() => {
     let cancelled = false
     setStatus('loading')
@@ -157,6 +163,13 @@ function BookingSeatPage() {
     setSelectedSeats((prev) =>
       prev.includes(seat.id) ? prev.filter((seatId) => seatId !== seat.id) : [...prev, seat.id],
     )
+  }
+
+  const handleProceedToPayment = () => {
+    const confirmed = window.confirm('선택한 좌석을 변경할 수 없습니다. 결제 하시겠습니까?')
+    if (confirmed) {
+      setShowPaymentWidget(true)
+    }
   }
 
   const updateTicketCount = (key, delta) => {
@@ -370,7 +383,7 @@ function BookingSeatPage() {
                     <button
                       type="button"
                       disabled={!seatsMatchTickets}
-                      onClick={() => setShowPaymentWidget(true)}
+                      onClick={handleProceedToPayment}
                       className="rounded-lg bg-indigo-600 px-6 py-3 text-sm font-semibold text-white hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-gray-300"
                     >
                       결제하기

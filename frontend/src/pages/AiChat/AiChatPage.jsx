@@ -1,19 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../../auth/AuthContext'
-import { getChatHistory, sendChatMessage } from '../../api/chatApi'
+import { clearChatHistory, getChatHistory, sendChatMessage } from '../../api/chatApi'
 import ChatBubble from './components/ChatBubble'
 import ChatMovieRecommendation from './components/ChatMovieRecommendation'
 
-const BASE_QUICK_REPLIES = [
+const QUICK_REPLIES = [
   '같은 장르의 영화들을 추천해줘',
   '이번 주말에 볼만한 영화 추천해줘',
   '짧고 가볍게 볼 영화 추천해줘',
   '이 영화 찜해줘',
-  '이 영화 바로 예매해줘',
 ]
-
-// 아직 실제 동작(예매 처리 등)이 연결되지 않은 빠른 답변 - 클릭해도 아무 일도 일어나지 않도록 비활성화합니다.
-const DISABLED_QUICK_REPLIES = new Set(['이 영화 바로 예매해줘'])
 
 function formatToday() {
   const date = new Date()
@@ -34,27 +30,49 @@ function fromSavedMessage(saved, id) {
   return { id, from, type: 'text', content: saved.content }
 }
 
+// 스피너 대신 말풍선 안에서 점 3개가 번갈아 깜빡이는 타이핑 표시입니다.
+function TypingIndicator() {
+  return (
+    <span className="flex items-center gap-1 py-0.5">
+      {[0, 1, 2].map((i) => (
+        <span
+          key={i}
+          className="h-1.5 w-1.5 animate-bounce rounded-full bg-gray-400"
+          style={{ animationDelay: `${i * 0.15}s` }}
+        />
+      ))}
+    </span>
+  )
+}
+
 function AiChatPage() {
   const { user } = useAuth()
-  const [messages, setMessages] = useState([GREETING])
+  const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
   const [isLoadingHistory, setIsLoadingHistory] = useState(true)
   const [isSending, setIsSending] = useState(false)
   const nextId = useRef(1)
+  const bottomRef = useRef(null)
 
   // 접속 시점의 실제 날짜를 그때그때 반영해야 하니, 고정 배열이 아니라 렌더링마다 새로 만듭니다.
-  const quickReplies = [...BASE_QUICK_REPLIES, `오늘(${formatToday()} 기준) 상영중인 영화를 찾아줘`]
+  const quickReplies = [...QUICK_REPLIES, `오늘(${formatToday()} 기준) 상영중인 영화를 찾아줘`]
 
   useEffect(() => {
     let cancelled = false
     getChatHistory(user.id)
       .then((saved) => {
-        if (cancelled || saved.length === 0) return
+        if (cancelled) return
+        // 저장된 대화가 있으면 그것만 보여주고(인사말을 또 앞에 붙이지 않음), 없을 때만(새 사용자) 인사말을 보여줍니다.
+        if (saved.length === 0) {
+          setMessages([GREETING])
+          return
+        }
         const loaded = saved.map((item) => fromSavedMessage(item, nextId.current++))
-        setMessages((prev) => [...prev, ...loaded])
+        setMessages(loaded)
       })
       .catch(() => {
-        // 이전 대화를 못 불러와도 새 대화는 계속할 수 있어야 하니 조용히 넘어갑니다.
+        // 이전 대화를 못 불러와도 새 대화는 계속할 수 있어야 하니, 인사말만 보여주고 조용히 넘어갑니다.
+        if (!cancelled) setMessages([GREETING])
       })
       .finally(() => {
         if (!cancelled) setIsLoadingHistory(false)
@@ -64,17 +82,18 @@ function AiChatPage() {
     }
   }, [user.id])
 
+  // 메시지가 추가될 때마다 맨 아래로 스크롤합니다(새 답변이 와도 사용자가 직접 내릴 필요 없게).
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages])
+
   const sendMessage = async (text) => {
     const trimmed = text.trim()
     if (!trimmed || isSending) return
 
     const userMessage = { id: nextId.current++, from: 'user', type: 'text', content: trimmed }
     const loadingMessageId = nextId.current++
-    setMessages((prev) => [
-      ...prev,
-      userMessage,
-      { id: loadingMessageId, from: 'ai', type: 'text', content: '취향을 분석해서 딱 맞는 영화를 찾고 있어요...' },
-    ])
+    setMessages((prev) => [...prev, userMessage, { id: loadingMessageId, from: 'ai', type: 'loading' }])
     setInput('')
     setIsSending(true)
 
@@ -94,7 +113,13 @@ function AiChatPage() {
         prev.map((message) =>
           message.id !== loadingMessageId
             ? message
-            : { id: loadingMessageId, from: 'ai', type: 'text', content: `죄송해요, 오류가 발생했어요: ${error.message}` },
+            : {
+                id: loadingMessageId,
+                from: 'ai',
+                type: 'text',
+                isError: true,
+                content: `죄송해요, 오류가 발생했어요: ${error.message}`,
+              },
         ),
       )
     } finally {
@@ -107,8 +132,31 @@ function AiChatPage() {
     sendMessage(input)
   }
 
+  const handleNewConversation = async () => {
+    if (isSending) return
+    if (!window.confirm('지금까지의 대화 내역을 전부 지우고 새로 시작할까요?')) return
+    try {
+      await clearChatHistory(user.id)
+      nextId.current = 1
+      setMessages([GREETING])
+    } catch (error) {
+      window.alert(error.message)
+    }
+  }
+
   return (
     <div className="mx-auto flex h-[calc(100svh-64px)] max-w-4xl flex-col px-6 py-6">
+      <div className="mb-3 flex items-center justify-between">
+        <h1 className="text-lg font-bold text-gray-100">AI 추천</h1>
+        <button
+          type="button"
+          onClick={handleNewConversation}
+          className="rounded-lg border border-gray-700 px-3 py-1.5 text-xs text-gray-300 hover:bg-slate-800"
+        >
+          새 대화 시작
+        </button>
+      </div>
+
       <div className="flex-1 space-y-4 overflow-y-auto pb-4">
         {isLoadingHistory && <p className="text-xs text-gray-500">이전 대화를 불러오는 중...</p>}
         {messages.map((message) =>
@@ -116,12 +164,17 @@ function AiChatPage() {
             <ChatBubble key={message.id} from={message.from}>
               <ChatMovieRecommendation analysis={message.analysis} movies={message.movies} />
             </ChatBubble>
-          ) : (
+          ) : message.type === 'loading' ? (
             <ChatBubble key={message.id} from={message.from}>
+              <TypingIndicator />
+            </ChatBubble>
+          ) : (
+            <ChatBubble key={message.id} from={message.from} isError={message.isError}>
               {message.content}
             </ChatBubble>
           ),
         )}
+        <div ref={bottomRef} />
       </div>
 
       <div className="mb-3 flex flex-wrap gap-2">
@@ -129,7 +182,7 @@ function AiChatPage() {
           <button
             key={reply}
             type="button"
-            disabled={isSending || DISABLED_QUICK_REPLIES.has(reply)}
+            disabled={isSending}
             onClick={() => sendMessage(reply)}
             className="rounded-full border border-gray-700 px-3 py-1.5 text-xs text-gray-300 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
           >
@@ -150,9 +203,13 @@ function AiChatPage() {
         <button
           type="submit"
           disabled={isSending}
-          className="flex items-center justify-center rounded-lg bg-indigo-600 px-4 text-white hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-40"
+          className="flex w-11 items-center justify-center rounded-lg bg-indigo-600 text-white hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"
         >
-          ➤
+          {isSending ? (
+            <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+          ) : (
+            '➤'
+          )}
         </button>
       </form>
     </div>

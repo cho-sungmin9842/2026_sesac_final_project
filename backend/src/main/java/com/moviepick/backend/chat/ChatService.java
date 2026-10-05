@@ -14,6 +14,8 @@ import com.moviepick.backend.movie.MovieService;
 import com.moviepick.backend.movie.dto.ActorDto;
 import com.moviepick.backend.movie.dto.MovieDetailDto;
 import com.moviepick.backend.movie.dto.MovieSummaryDto;
+import com.moviepick.backend.screening.Screening;
+import com.moviepick.backend.screening.ScreeningRepository;
 import com.moviepick.backend.wishlist.WishlistService;
 import com.moviepick.backend.wishlist.dto.WishlistRequest;
 import lombok.extern.slf4j.Slf4j;
@@ -23,7 +25,9 @@ import org.springframework.stereotype.Service;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
@@ -37,7 +41,11 @@ import java.util.stream.Collectors;
 @Service
 public class ChatService {
 
-    private static final int MAX_RECOMMENDATIONS = 6;
+    // 사용자가 개수를 안 밝혔을 때 기본으로 보여줄 개수(화면 카드 그리드 3열에 맞춰 둘 줄 꽉 차는 값).
+    private static final int DEFAULT_RECOMMENDATIONS = 6;
+    // 사용자가 숫자로 개수를 콕 집어 말했을 때 허용하는 최대치(그 이상은 과도한 KMDB 조회/카드 렌더링
+    // 부담이 있어 여기서 자릅니다).
+    private static final int MAX_RECOMMENDATIONS = 10;
     // 대화가 길어질수록 Gemini가 예전 주제(예: 특정 영화 얘기)에 "고착"돼서, 전혀 새로운 배우/감독 이름을
     // 말해도 못 알아듣는 현상이 실제로 있었습니다. 조건 추출에는 최근 몇 턴만 넘겨서 그 영향을 줄입니다.
     private static final int MAX_HISTORY_TURNS_FOR_EXTRACTION = 6;
@@ -56,6 +64,7 @@ public class ChatService {
     private final UserRepository userRepository;
     private final ObjectMapper objectMapper;
     private final WishlistService wishlistService;
+    private final ScreeningRepository screeningRepository;
 
     public ChatService(
             GeminiClient geminiClient,
@@ -63,7 +72,8 @@ public class ChatService {
             ChatMessageRepository chatMessageRepository,
             UserRepository userRepository,
             ObjectMapper objectMapper,
-            WishlistService wishlistService
+            WishlistService wishlistService,
+            ScreeningRepository screeningRepository
     ) {
         this.geminiClient = geminiClient;
         this.movieService = movieService;
@@ -71,6 +81,7 @@ public class ChatService {
         this.userRepository = userRepository;
         this.objectMapper = objectMapper;
         this.wishlistService = wishlistService;
+        this.screeningRepository = screeningRepository;
     }
 
     // 저장된 대화 내역을 시간순으로 돌려줍니다. 추천 메시지는 movie_ids로 KMDB 상세를 다시 조회해
@@ -79,6 +90,11 @@ public class ChatService {
         return chatMessageRepository.findByUserIdOrderByCreatedAtAsc(userId).stream()
                 .map(message -> new ChatMessageDto(message.getRole(), message.getContent(), moviesFrom(message.getMovieIds())))
                 .toList();
+    }
+
+    // "새 대화 시작" - 이 사용자의 저장된 대화를 전부 지웁니다.
+    public void clearHistory(Long userId) {
+        chatMessageRepository.deleteByUserId(userId);
     }
 
     private List<MovieSummaryDto> moviesFrom(String movieIds) {
@@ -116,7 +132,9 @@ public class ChatService {
         List<ChatMessage> fullHistory = chatMessageRepository.findByUserIdOrderByCreatedAtAsc(userId);
 
         // "찜해줘"는 Gemini 판단이 필요 없는 결정적 동작이라, 조건 추출 자체를 거치지 않고 바로 처리합니다.
-        if (WISHLIST_HINT.matcher(request.message()).find()) {
+        // 다만 "찜 안 하고 싶어"처럼 부정/취소 표현이 섞여 있으면 이 결정적 분기를 건너뛰고 일반 조건
+        // 추출로 넘깁니다(그래야 진짜 의도에 맞게 답할 수 있습니다).
+        if (WISHLIST_HINT.matcher(request.message()).find() && !WISHLIST_NEGATION_HINT.matcher(request.message()).find()) {
             return handleWishlistRequest(user, request.message(), fullHistory);
         }
 
@@ -149,13 +167,19 @@ public class ChatService {
         // 영화 추천/특정 영화 정보와 전혀 상관없는 질문(날씨, 잡담 등)이면 KMDB를 뒤져 억지로 영화를
         // 끼워 맞추지 않고, 서비스 용도를 안내하는 답으로 바로 응답합니다.
         if ("off_topic".equals(filter.intent())) {
-            String reply = "저는 영화 추천을 도와드리는 AI예요 🎬 보고 싶은 장르나 배우, 감독, 소재를 말씀해주시면 국내 영화를 찾아드릴게요!";
+            String reply = pickOffTopicReply();
             return persistTurn(user, request.message(), reply, List.of());
         }
 
         // "영화 추천해줘"가 아니라 "그 영화 장르/배우 알려줘"처럼 이미 나온(또는 대화 맥락 속) 특정 영화에 대한
-        // 질문이면, 추천 목록을 다시 만드는 대신 그 영화 한 편의 상세 정보(장르/감독/배우/러닝타임)로 답합니다.
+        // 질문이면, 추천 목록을 다시 만드는 대신 그 영화 한 편의 정보로 답합니다. 그중에서도 "상영정보/상영
+        // 시간/몇 시에 하는지"처럼 실제 상영 스케줄을 물어본 거라면, 장르/감독/배우 같은 일반 정보가 아니라
+        // screenings 테이블의 실제 이번 주 상영 스케줄로 답해야 합니다(전에는 둘을 구분하지 않고 항상 일반
+        // 정보만 줘서, "상영 정보 알려줘"라고 물어도 장르/감독/배우만 나오는 버그가 있었습니다).
         if ("movie_question".equals(filter.intent()) && filter.query() != null) {
+            if (SCREENING_QUESTION_HINT.matcher(request.message()).find()) {
+                return answerScreeningQuestion(user, request.message(), filter.query());
+            }
             return answerMovieQuestion(user, request.message(), filter.query());
         }
 
@@ -257,6 +281,53 @@ public class ChatService {
         String reply = describeMovieDetail(detail);
 
         return persistTurn(user, userMessage, reply, List.of(matches.get(0)));
+    }
+
+    private static final java.util.regex.Pattern SCREENING_QUESTION_HINT = java.util.regex.Pattern.compile(
+            "상영\\s*(정보|시간|스케줄|일정|관)|몇\\s*시에?\\s*(상영|해|하나|하는)|언제\\s*상영|상영표");
+
+    // 실제 상영 스케줄(상영관/날짜/시간)로 답합니다 - 장르/감독/배우 같은 일반 정보(describeMovieDetail)와는
+    // 다른 질문이라 구분해서 처리합니다. 예매 화면과 완전히 같은 데이터 소스(screenings 테이블, 매주
+    // 월요일 자정 배치가 생성)를 그대로 써서 실제 예매 가능한 회차만 보여줍니다.
+    private ChatResponseDto answerScreeningQuestion(User user, String userMessage, String movieTitle) {
+        List<MovieSummaryDto> matches = movieService.search(movieTitle, List.of(), null, "latest", 1, 1, "title").movies();
+        if (matches.isEmpty()) {
+            String reply = "'%s' 영화를 찾지 못했어요. 정확한 제목으로 다시 물어봐주시겠어요?".formatted(movieTitle);
+            return persistTurn(user, userMessage, reply, List.of());
+        }
+
+        MovieSummaryDto movie = matches.get(0);
+        List<Screening> screenings = screeningRepository.findByMovieIdOrderByDateAscStartTimeAsc(movie.id());
+        if (screenings.isEmpty()) {
+            String reply = "'%s'의 이번 주 상영 정보가 없어요. 상영이 종료됐거나 이번 주에는 편성되지 않았을 수 있어요."
+                    .formatted(movie.title());
+            return persistTurn(user, userMessage, reply, List.of(movie));
+        }
+
+        String reply = "'%s' 상영 정보예요.\n%s".formatted(movie.title(), describeScreenings(screenings));
+        return persistTurn(user, userMessage, reply, List.of(movie));
+    }
+
+    private static final String[] KOREAN_WEEKDAYS = {"월", "화", "수", "목", "금", "토", "일"};
+
+    // 같은 날짜+상영관이면 시간만 이어붙여서("10:00, 13:30") 한 줄로 요약합니다(상영관/날짜마다 줄이
+    // 따로 생기면 하루에 여러 회차가 있을 때 너무 길어집니다).
+    private String describeScreenings(List<Screening> screenings) {
+        Map<String, List<Screening>> grouped = new LinkedHashMap<>();
+        for (Screening screening : screenings) {
+            String key = screening.getDate() + "|" + screening.getTheater().getName();
+            grouped.computeIfAbsent(key, k -> new ArrayList<>()).add(screening);
+        }
+
+        return grouped.values().stream()
+                .map(group -> {
+                    Screening first = group.get(0);
+                    LocalDate date = first.getDate();
+                    String weekday = KOREAN_WEEKDAYS[date.getDayOfWeek().getValue() - 1];
+                    String times = group.stream().map(s -> s.getStartTime().toString()).collect(Collectors.joining(", "));
+                    return "- %d/%d(%s) %s: %s".formatted(date.getMonthValue(), date.getDayOfMonth(), weekday, first.getTheater().getName(), times);
+                })
+                .collect(Collectors.joining("\n"));
     }
 
     private String describeMovieDetail(MovieDetailDto detail) {
@@ -481,7 +552,7 @@ public class ChatService {
 
     private int resolveLimit(Integer requestedCount) {
         if (requestedCount == null || requestedCount < 1) {
-            return MAX_RECOMMENDATIONS;
+            return DEFAULT_RECOMMENDATIONS;
         }
         return Math.min(requestedCount, MAX_RECOMMENDATIONS);
     }
@@ -507,6 +578,18 @@ public class ChatService {
         return condition.isBlank()
                 ? "%s %s 마음에 드는 작품을 골라보세요 🍿\n%s".formatted(titles, suffix, guide)
                 : "%s 조건에 맞춰 %s %s 마음에 드는 작품을 골라보세요 🍿\n%s".formatted(condition, titles, suffix, guide);
+    }
+
+    // 매번 똑같은 문구만 나오면 기계적으로 느껴져서, 뜻은 같지만 표현이 다른 몇 가지 중 하나를 무작위로
+    // 고릅니다(여기도 Gemini를 또 부르진 않습니다 - 고정 후보 중 고르는 것뿐이라 호출 비용이 없습니다).
+    private static final List<String> OFF_TOPIC_REPLIES = List.of(
+            "저는 영화 추천을 도와드리는 AI예요 🎬 보고 싶은 장르나 배우, 감독, 소재를 말씀해주시면 국내 영화를 찾아드릴게요!",
+            "그건 제가 답하기 어려운 질문이네요 😅 대신 영화 이야기라면 자신 있어요 - 어떤 장르나 배우가 끌리세요?",
+            "영화 추천 전문 AI라 그 질문엔 답을 못 드려요 🎬 요즘 보고 싶은 분위기나 소재를 알려주시면 바로 찾아드릴게요!"
+    );
+
+    private String pickOffTopicReply() {
+        return OFF_TOPIC_REPLIES.get(java.util.concurrent.ThreadLocalRandom.current().nextInt(OFF_TOPIC_REPLIES.size()));
     }
 
     private String describeFilter(ExtractedFilter filter) {
@@ -608,6 +691,11 @@ public class ChatService {
     }
 
     private static final java.util.regex.Pattern WISHLIST_HINT = java.util.regex.Pattern.compile("찜");
+    // "찜 안 하고 싶어"/"찜 말고"/"찜 취소해줘"처럼 "찜"이 들어가도 실제로는 찜을 하지 말라는(또는 찜과
+    // 무관한) 뜻이면 찜 처리로 바로 새지 않도록, 근처에 부정/취소 표현이 있으면 이 결정적 분기를 건너뛰고
+    // 일반 조건 추출(Gemini)로 넘깁니다.
+    private static final java.util.regex.Pattern WISHLIST_NEGATION_HINT =
+            java.util.regex.Pattern.compile("찜.{0,4}(안|말고|말아|하지\\s*마|취소|빼)|(안|말고|하지\\s*마).{0,4}찜");
 
     // "이 영화 찜해줘"처럼 직전에 추천받은 영화를 찜 목록에 담아달라는 요청은 판단이 필요한 게 아니라 그냥
     // 실행하면 되는 결정적인 동작이라, Gemini에게 물어보지 않고 정규식으로 바로 처리합니다(API 호출도
@@ -637,7 +725,7 @@ public class ChatService {
     // 예매 화면의 "상영중인 영화" 목록과 같은 기준(MovieService.getNowShowing, 최근 4주 개봉작)으로 바로
     // 답합니다.
     private ChatResponseDto handleNowShowingRequest(User user, String userMessage) {
-        List<MovieSummaryDto> movies = movieService.getNowShowing(MAX_RECOMMENDATIONS).movies();
+        List<MovieSummaryDto> movies = movieService.getNowShowing(DEFAULT_RECOMMENDATIONS).movies();
         if (movies.isEmpty()) {
             String reply = "지금 상영중인 국내 영화를 찾지 못했어요.";
             return persistTurn(user, userMessage, reply, List.of());

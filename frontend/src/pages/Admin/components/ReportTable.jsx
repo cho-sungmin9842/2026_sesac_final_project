@@ -1,51 +1,40 @@
-const STATUS_STYLES = {
-  대기: 'bg-red-500/10 text-red-400',
-  검토중: 'bg-amber-500/10 text-amber-400',
-  처리완료: 'bg-emerald-500/10 text-emerald-400',
+function formatDateTime(dateTimeStr) {
+  const date = new Date(dateTimeStr)
+  return date.toLocaleString('ko-KR', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
 }
 
-function ReportTable({ reports }) {
+// movieId/userId별 필터링 없이, DB에 저장된 모든 사용자의 리뷰를 그대로 보여줍니다.
+function ReportTable({ reviews, onDelete }) {
   return (
     <table className="w-full text-left text-sm">
       <thead>
         <tr className="border-b border-white/5 text-gray-400">
           <th className="py-3 font-medium">영화</th>
+          <th className="py-3 font-medium">작성자</th>
+          <th className="py-3 font-medium">평점</th>
           <th className="py-3 font-medium">리뷰 내용</th>
-          <th className="py-3 font-medium">신고 사유</th>
-          <th className="py-3 font-medium">상태</th>
+          <th className="py-3 font-medium">작성일</th>
           <th className="py-3 font-medium">처리</th>
         </tr>
       </thead>
       <tbody>
-        {reports.map((report) => (
-          <tr key={report.id} className="border-b border-white/5 text-gray-200">
-            <td className="py-4 font-semibold">{report.movie}</td>
-            <td className="py-4 text-gray-400">{report.content}</td>
-            <td className="py-4 text-gray-400">{report.reason}</td>
-            <td className="py-4">
-              <span className={`rounded-md px-2 py-1 text-xs font-medium ${STATUS_STYLES[report.status]}`}>
-                {report.status}
-              </span>
+        {reviews.map((review) => (
+          <tr key={review.id} className="border-b border-white/5 text-gray-200">
+            <td className="py-4 font-semibold">{review.movieTitle}</td>
+            <td className="py-4 text-gray-300">{review.authorNickname}</td>
+            <td className="py-4 text-gray-300">★ {review.score}</td>
+            <td className="py-4 max-w-xs truncate text-gray-400" title={review.content}>
+              {review.content}
             </td>
+            <td className="py-4 whitespace-nowrap text-gray-400">{formatDateTime(review.createdAt)}</td>
             <td className="py-4">
-              {report.status === '처리완료' ? (
-                <span className="rounded-md bg-slate-800 px-3 py-1.5 text-xs text-gray-400">완료됨</span>
-              ) : (
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    className="rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-500"
-                  >
-                    태그 부착
-                  </button>
-                  <button
-                    type="button"
-                    className="rounded-md bg-slate-800 px-3 py-1.5 text-xs font-semibold text-gray-200 hover:bg-slate-700"
-                  >
-                    삭제
-                  </button>
-                </div>
-              )}
+              <button
+                type="button"
+                onClick={() => onDelete(review.id)}
+                className="rounded-md bg-slate-800 px-3 py-1.5 text-xs font-semibold text-gray-200 hover:bg-rose-600"
+              >
+                삭제
+              </button>
             </td>
           </tr>
         ))}

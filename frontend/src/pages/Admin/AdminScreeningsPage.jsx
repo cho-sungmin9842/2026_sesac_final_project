@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { getScreenings, getScreeningSeats } from '../../api/screeningApi'
 import { getNowShowing } from '../../api/movieApi'
 import StatCard from './components/StatCard'
+import AdminSeatMap from './components/AdminSeatMap'
 
 function toHourMinute(timeStr) {
   return timeStr.slice(0, 5)
@@ -18,6 +19,7 @@ function AdminScreeningsPage() {
   const [selectedDate, setSelectedDate] = useState('')
   const [occupancy, setOccupancy] = useState([])
   const [occupancyStatus, setOccupancyStatus] = useState('idle') // idle | loading | ready | error
+  const [selectedScreeningId, setSelectedScreeningId] = useState(null)
 
   useEffect(() => {
     let cancelled = false
@@ -82,15 +84,18 @@ function AdminScreeningsPage() {
     Promise.all(
       matchingScreenings.map((screening) =>
         getScreeningSeats(screening.id).then((seats) => ({
+          screeningId: screening.id,
           showtime: toHourMinute(screening.startTime),
           totalSeats: seats.length,
           bookedSeats: seats.filter((seat) => seat.status === 'BOOKED'),
+          seats,
         })),
       ),
     )
       .then((rows) => {
         if (cancelled) return
         setOccupancy(rows)
+        setSelectedScreeningId(rows.length > 0 ? rows[0].screeningId : null)
         setOccupancyStatus('ready')
       })
       .catch(() => {
@@ -188,7 +193,13 @@ function AdminScreeningsPage() {
             </thead>
             <tbody>
               {occupancy.map((row) => (
-                <tr key={row.showtime} className="border-b border-white/5 last:border-0">
+                <tr
+                  key={row.showtime}
+                  onClick={() => setSelectedScreeningId(row.screeningId)}
+                  className={`cursor-pointer border-b border-white/5 last:border-0 hover:bg-white/5 ${
+                    selectedScreeningId === row.screeningId ? 'bg-indigo-500/10' : ''
+                  }`}
+                >
                   <td className="py-3 font-semibold text-white">{row.showtime}</td>
                   <td className="py-3 text-gray-300">
                     {row.bookedSeats.length} / {row.totalSeats}
@@ -207,6 +218,21 @@ function AdminScreeningsPage() {
           </table>
         )}
       </div>
+
+      {occupancyStatus === 'ready' && occupancy.length > 0 && (
+        <div className="mt-6 rounded-xl bg-slate-900/60 p-6">
+          {occupancy
+            .filter((row) => row.screeningId === selectedScreeningId)
+            .map((row) => (
+              <div key={row.screeningId}>
+                <p className="mb-4 text-sm text-gray-400">
+                  <span className="font-semibold text-white">{row.showtime}</span> 회차 좌석 현황
+                </p>
+                <AdminSeatMap seats={row.seats} />
+              </div>
+            ))}
+        </div>
+      )}
     </div>
   )
 }

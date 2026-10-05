@@ -11,6 +11,9 @@ public interface ReviewRepository extends JpaRepository<Review, Long> {
 
     List<Review> findByMovieIdOrderByCreatedAtDesc(String movieId);
 
+    // 관리자 "리뷰 신고 관리" 화면 - 특정 영화/사용자로 좁히지 않고 DB에 저장된 모든 사용자의 리뷰를 보여줍니다.
+    List<Review> findAllByOrderByCreatedAtDesc();
+
     // 마이페이지 "내가 쓴 리뷰" 탭 - 영화 구분 없이 이 사용자가 쓴 모든 리뷰.
     List<Review> findByUserIdOrderByCreatedAtDesc(Long userId);
 

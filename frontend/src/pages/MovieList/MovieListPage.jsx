@@ -11,6 +11,7 @@ const RUNTIME_LIMIT_MINUTES = 120
 const SORT_OPTIONS = [
   { value: 'latest', label: '최신순' },
   { value: 'name', label: '이름순' },
+  { value: 'rating', label: '평점순' },
 ]
 
 function MovieListPage() {

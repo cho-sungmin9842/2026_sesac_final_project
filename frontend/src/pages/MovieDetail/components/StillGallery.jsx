@@ -1,44 +1,15 @@
-import { useEffect, useState } from 'react'
-
-// KMDB 스틸컷 원본이 실제로 200x100px 안팎일 정도로 작아서, 너무 키우면 흐려집니다.
-// 화질과 크기의 절충으로 원본의 2배까지만 확대합니다.
-const MAX_UPSCALE = 2
-
-// 2배 정도의 적당한 확대에서도 번져 보이는 걸 줄이기 위한 SVG 샤프닝(언샵 마스크) 필터입니다.
-// 8~10배로 늘렸을 때는 이 필터로도 한계가 있었지만, 지금처럼 배율이 낮으면 효과가 분명합니다.
-function SharpenFilterDefs() {
-  return (
-    <svg width="0" height="0" className="absolute">
-      <filter id="still-sharpen">
-        <feConvolveMatrix order="3" kernelMatrix="0 -1 0 -1 5 -1 0 -1 0" preserveAlpha="true" />
-      </filter>
-    </svg>
-  )
-}
+import { useState } from 'react'
 
 function StillDialog({ stillUrls, index, onClose, onPrev, onNext }) {
   const hasMultiple = stillUrls.length > 1
-  const [naturalSize, setNaturalSize] = useState(null)
-
-  // 이미지가 바뀌면(이전/다음) 새 원본 크기를 다시 재야 합니다.
-  useEffect(() => {
-    setNaturalSize(null)
-  }, [index])
-
-  const capStyle = naturalSize
-    ? { maxWidth: naturalSize.width * MAX_UPSCALE, maxHeight: naturalSize.height * MAX_UPSCALE }
-    : {}
+  const displaySrc = stillUrls[index]
 
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 px-4"
       onClick={onClose}
     >
-      <SharpenFilterDefs />
-      <div
-        className="relative flex h-[85svh] w-[90vw] max-w-5xl items-center justify-center"
-        onClick={(event) => event.stopPropagation()}
-      >
+      <div className="relative" onClick={(event) => event.stopPropagation()}>
         <button
           type="button"
           onClick={onClose}
@@ -54,14 +25,11 @@ function StillDialog({ stillUrls, index, onClose, onPrev, onNext }) {
           </p>
         )}
 
+        {/* 다이얼로그를 사진 원본 크기 그대로 보여줍니다(화면보다 큰 경우에만 화면 안에 들어오게 줄임). */}
         <img
-          src={stillUrls[index]}
+          src={displaySrc}
           alt={`스틸컷 ${index + 1}`}
-          onLoad={(event) =>
-            setNaturalSize({ width: event.target.naturalWidth, height: event.target.naturalHeight })
-          }
-          className="h-full w-full rounded-lg object-contain"
-          style={{ ...capStyle, filter: 'url(#still-sharpen) contrast(1.06)', imageRendering: '-webkit-optimize-contrast' }}
+          className="max-h-[90svh] max-w-[92vw] rounded-lg object-contain"
         />
 
         {hasMultiple && (

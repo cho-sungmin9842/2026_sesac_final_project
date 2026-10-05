@@ -65,6 +65,16 @@ public class MovieService {
         // 최신순 -> prodYear,1 / 이름순 -> title,0. KMDB가 직접 지원하는 정렬이라 응답 자체가 이미 정렬돼서 옵니다.
         String kmdbSort = toKmdbSort(sort);
 
+        // 평점순(검색어 없음, 장르는 0개~여러 개 모두) - 장르/연도 조건과 함께 KMDB에서 500건만 미리 받아
+        // 그 안에서 재정렬하면, 실제로 리뷰가 달린 영화가 그 500건(최신순 상위) 범위 밖에 있는 경우가 흔해
+        // 평점 있는 영화가 하나도 안 보이는 문제가 있었습니다(장르를 좁혀도 마찬가지입니다 - 그 장르
+        // 안에서도 최신 500건 범위 밖이면 똑같이 안 보입니다). 그래서 평점순일 때는 KMDB 전체를 훑는 대신
+        // 우리 DB(리뷰)에 평점이 있는 영화만 먼저 평점순으로 가져온 뒤(이 목록 자체가 작으므로 전수 조사
+        // 가능), 장르 조건은 그 안에서 걸러냅니다(평점이 아예 없는 영화는 "평점순" 목록에 넣을 수 없으니 제외).
+        if (!hasQuery && "rating".equals(sort)) {
+            return searchByRating(cleanGenres, page, pageSize);
+        }
+
         if (cleanGenres.size() <= 1 && !hasQuery) {
             // 검색어가 없으면(장르/연도만으로 찾아보기, "전체 영화") 뒤에서 텍스트로 한 번 더 거를 필요가 없으니,
             // KMDB의 startCount/listCount로 이번 페이지 분량만 바로 받아옵니다. 그래야 몇 만 건짜리 카탈로그도
@@ -179,11 +189,20 @@ public class MovieService {
     }
 
     private List<MovieSummaryDto> sortMovies(List<MovieSummaryDto> movies, String sort) {
-        // title이 빈 값이라 null인 항목도 있어서(KmdbTextUtils.clean), Collator 비교 전에 null을 뒤로 뺍니다.
-        Comparator<MovieSummaryDto> comparator = "name".equals(sort)
-                ? Comparator.comparing(MovieSummaryDto::title, Comparator.nullsLast(Collator.getInstance(Locale.KOREAN)))
-                : Comparator.comparing((MovieSummaryDto movie) -> movie.year() == null ? Integer.MIN_VALUE : movie.year())
-                        .reversed();
+        Comparator<MovieSummaryDto> comparator;
+        if ("name".equals(sort)) {
+            // title이 빈 값이라 null인 항목도 있어서(KmdbTextUtils.clean), Collator 비교 전에 null을 뒤로 뺍니다.
+            comparator = Comparator.comparing(MovieSummaryDto::title, Comparator.nullsLast(Collator.getInstance(Locale.KOREAN)));
+        } else if ("rating".equals(sort)) {
+            // 리뷰가 하나도 없는 영화(averageScore null)는 평점이 없는 거라 항상 맨 뒤로 보내고, 리뷰가
+            // 있는 영화끼리는 평점 높은 순으로 정렬합니다. reverseOrder를 nullsLast 안쪽에 넣어야
+            // null은 그대로 맨 뒤에 고정되고, null이 아닌 값들만 내림차순이 됩니다(바깥에서 전체를
+            // reversed()하면 null까지 맨 앞으로 와버립니다).
+            comparator = Comparator.comparing(MovieSummaryDto::averageScore, Comparator.nullsLast(Comparator.reverseOrder()));
+        } else {
+            comparator = Comparator.comparing((MovieSummaryDto movie) -> movie.year() == null ? Integer.MIN_VALUE : movie.year())
+                    .reversed();
+        }
         return movies.stream().sorted(comparator).toList();
     }
 
@@ -201,8 +220,15 @@ public class MovieService {
     // "상영중" 영화 전체 목록입니다. 오늘 스냅샷이 이미 있으면 그대로 재사용하고, 없으면(그날 첫 조회) KMDB로
     // 계산해서 스냅샷에 저장합니다 - 같은 날에는 어느 쪽에서 먼저 호출하든 KMDB 호출이 하루 한 번으로 줄어듭니다.
     public List<MovieSummaryDto> getOrCreateTodayShowingMovies() {
-        LocalDate today = LocalDate.now();
-        List<NowShowingSnapshot> snapshot = nowShowingSnapshotRepository.findBySnapshotDateOrderByDisplayOrderAsc(today);
+        return getOrCreateShowingMoviesForDate(LocalDate.now());
+    }
+
+    // 위와 같은 로직을 임의의 날짜 기준으로 계산합니다. ScreeningGenerationService가 한 주(월~일) 상영정보를
+    // 만들 때, "월요일 기준 상영중 목록" 하나로 7일치를 전부 채우면 화~일요일 사이에 상영중 목록이 바뀐(예:
+    // 새로 개봉했거나 개봉 4주가 지나 빠진) 영화가 그 주 내내 상영정보 없이 누락되는 문제가 있어, 요일별로
+    // 각각의 날짜 기준 상영중 목록을 따로 계산해 써야 합니다.
+    public List<MovieSummaryDto> getOrCreateShowingMoviesForDate(LocalDate date) {
+        List<NowShowingSnapshot> snapshot = nowShowingSnapshotRepository.findBySnapshotDateOrderByDisplayOrderAsc(date);
 
         if (!snapshot.isEmpty()) {
             List<String> movieIds = snapshot.stream().map(NowShowingSnapshot::getMovieId).toList();
@@ -215,15 +241,15 @@ public class MovieService {
             return movieCacheService.findCachedSummariesInOrder(movieIds, ratingsForCache);
         }
 
-        String releaseDte = today.format(KMDB_DATE_FORMAT);
-        String releaseDts = today.minusWeeks(4).format(KMDB_DATE_FORMAT);
+        String releaseDte = date.format(KMDB_DATE_FORMAT);
+        String releaseDts = date.minusWeeks(4).format(KMDB_DATE_FORMAT);
         // 날짜마다 실제 개봉작 수(KMDB TotalCount)가 다르므로 고정 건수로 자르지 않고, KMDB 한 번 호출 한도
         // (KMDB_MAX_LIST_COUNT)까지 요청해서 그날 "상영중"인 영화 전체를 빠짐없이 받아옵니다.
         FilledPage filled = fetchFilledPage("title", "", null, releaseDts, releaseDte, KMDB_MAX_LIST_COUNT, 0, null);
 
         List<NowShowingSnapshot> toSave = new ArrayList<>();
         for (int i = 0; i < filled.movies().size(); i++) {
-            toSave.add(new NowShowingSnapshot(today, filled.movies().get(i).id(), i));
+            toSave.add(new NowShowingSnapshot(date, filled.movies().get(i).id(), i));
         }
         nowShowingSnapshotRepository.saveAll(toSave);
 
@@ -315,6 +341,45 @@ public class MovieService {
             }
         }
         return results;
+    }
+
+    // 평점순 전용 - getPopularMovies와 같은 방식(리뷰 테이블에서 먼저 평점순으로 가져온 뒤 KMDB로 채움)
+    // 이지만, 고정 limit이 아니라 실제 페이지네이션(page/pageSize)을 지원하고 장르 조건도 받습니다.
+    // minScore를 0으로 두면 평점(1~5)이 하나라도 있는 영화는 전부 대상이 됩니다 - 리뷰가 달린 영화 자체가
+    // (장르 필터 없이도) 많지 않을 거라 가정하고 전부 가져와 KMDB 상세를 조회한 뒤 장르를 거릅니다.
+    private MovieSearchResultDto searchByRating(List<String> genres, int page, int pageSize) {
+        List<TopRatedMovie> topRated = reviewService.getTopRatedMovies(0);
+
+        // topRated가 이미 평점 내림차순이라, 장르로 거르기만 해도 그 순서가 그대로 유지됩니다.
+        List<MovieSummaryDto> matched = new ArrayList<>();
+        for (TopRatedMovie rated : topRated) {
+            String[] parts = rated.movieId().split("_", 2);
+            if (parts.length != 2) {
+                continue;
+            }
+            try {
+                MovieSummaryDto summary = summaryForId(rated.movieId(), parts[0], parts[1], rated.averageScore(), (int) rated.reviewCount());
+                if (summary == null || summary.title() == null || summary.title().isBlank()) {
+                    continue;
+                }
+                // 장르를 하나도 안 골랐으면("전체") 거르지 않고, 골랐으면 그중 하나라도 겹치면 포함합니다
+                // (홈 화면 "취향저격 신작"의 다중 장르 필터와 같은 OR 방식).
+                if (!genres.isEmpty() && genres.stream().noneMatch(genre -> summary.genres().contains(genre))) {
+                    continue;
+                }
+                matched.add(summary);
+            } catch (Exception ignored) {
+                // KMDB에서 더 이상 찾을 수 없게 된 movieId는 건너뜁니다.
+            }
+        }
+
+        int totalCount = matched.size();
+        int fromIndex = Math.min((page - 1) * pageSize, totalCount);
+        int toIndex = Math.min(page * pageSize, totalCount);
+        List<MovieSummaryDto> movies = matched.subList(fromIndex, toIndex);
+
+        int totalPages = totalCount == 0 ? 0 : (int) Math.ceil(totalCount / (double) pageSize);
+        return new MovieSearchResultDto(movies, page, pageSize, totalCount, totalPages);
     }
 
     // 요약 정보는 DB 캐시를 먼저 확인하고, 없을 때만 KMDB를 호출해 새로 캐시에 저장합니다.
