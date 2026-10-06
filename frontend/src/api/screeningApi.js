@@ -6,7 +6,9 @@ export function getScreenings(movieId) {
   return request(`/api/screenings?movieId=${encodeURIComponent(movieId)}`)
 }
 
-// 예매 화면의 좌석 배치도. 실제 seats 테이블 상태(AVAILABLE/BOOKED)를 그대로 내려받습니다.
-export function getScreeningSeats(screeningId) {
-  return request(`/api/screenings/${screeningId}/seats`)
+// 예매 화면/마이페이지 좌석 배치도 다이얼로그가 공통으로 씁니다. 실제 seats 테이블 상태
+// (AVAILABLE/BOOKED)를 그대로 내려받습니다. userId를 넘기면(마이페이지 쪽만 넘김) 각 좌석에
+// bookedByMe(내가 예매한 좌석인지)도 함께 내려옵니다.
+export function getScreeningSeats(screeningId, userId) {
+  return request(`/api/screenings/${screeningId}/seats`, userId != null ? { userId } : {})
 }

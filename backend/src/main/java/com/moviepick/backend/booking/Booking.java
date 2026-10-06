@@ -59,4 +59,17 @@ public class Booking {
         this.totalPrice = totalPrice;
         this.createdAt = LocalDateTime.now();
     }
+
+    // 예매 안에서 좌석 하나를 다른 좌석으로 바꿉니다(인원 구분은 그대로 유지합니다). fromSeatId가 이
+    // 예매의 좌석이 아니면 아무 것도 바꾸지 않고 false를 돌려줍니다(호출 쪽이 400을 던질지 판단합니다).
+    public boolean replaceSeat(Long fromSeatId, Long toSeatId) {
+        for (int i = 0; i < seats.size(); i++) {
+            BookingSeat current = seats.get(i);
+            if (current.getSeatId().equals(fromSeatId)) {
+                seats.set(i, new BookingSeat(toSeatId, current.getTicketCategory()));
+                return true;
+            }
+        }
+        return false;
+    }
 }

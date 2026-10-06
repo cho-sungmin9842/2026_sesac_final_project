@@ -56,5 +56,6 @@ export const years = [
     .filter((year) => !YEARS_WITH_NO_DATA.has(year))
     .map(String),
 ]
-// 러닝타임: KMDB 검색 API에 관련 파라미터가 없어 현재 페이지에 불러온 결과에만 클라이언트에서 적용합니다.
+// 러닝타임: KMDB 검색 API에 관련 파라미터가 없어, 백엔드가 응답을 받은 뒤 직접 걸러서 내려줍니다
+// (totalCount/페이지네이션에도 반영됨 - movieApi.js가 이 라벨을 under120/over120 코드로 바꿔 보냅니다).
 export const runtimeFilters = ['전체', '2시간 미만', '2시간 이상']

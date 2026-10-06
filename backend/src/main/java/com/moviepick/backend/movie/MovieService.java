@@ -42,22 +42,25 @@ public class MovieService {
     private final ReviewService reviewService;
     private final MovieCacheService movieCacheService;
     private final NowShowingSnapshotRepository nowShowingSnapshotRepository;
+    private final MovieCountCacheService movieCountCacheService;
 
     public MovieService(
             KmdbClient kmdbClient,
             MovieMapper movieMapper,
             ReviewService reviewService,
             MovieCacheService movieCacheService,
-            NowShowingSnapshotRepository nowShowingSnapshotRepository
+            NowShowingSnapshotRepository nowShowingSnapshotRepository,
+            MovieCountCacheService movieCountCacheService
     ) {
         this.kmdbClient = kmdbClient;
         this.movieMapper = movieMapper;
         this.reviewService = reviewService;
         this.movieCacheService = movieCacheService;
         this.nowShowingSnapshotRepository = nowShowingSnapshotRepository;
+        this.movieCountCacheService = movieCountCacheService;
     }
 
-    public MovieSearchResultDto search(String query, List<String> genres, String year, String sort, int page, int pageSize, String field) {
+    public MovieSearchResultDto search(String query, List<String> genres, String year, String runtime, String sort, int page, int pageSize, String field) {
         String releaseDts = year == null || year.isBlank() ? null : year + "0101";
         String releaseDte = year == null || year.isBlank() ? null : year + "1231";
         List<String> cleanGenres = genres == null ? List.of() : genres.stream().filter(g -> g != null && !g.isBlank()).toList();
@@ -72,7 +75,7 @@ public class MovieService {
         // 우리 DB(리뷰)에 평점이 있는 영화만 먼저 평점순으로 가져온 뒤(이 목록 자체가 작으므로 전수 조사
         // 가능), 장르 조건은 그 안에서 걸러냅니다(평점이 아예 없는 영화는 "평점순" 목록에 넣을 수 없으니 제외).
         if (!hasQuery && "rating".equals(sort)) {
-            return searchByRating(cleanGenres, page, pageSize);
+            return searchByRating(cleanGenres, runtime, page, pageSize);
         }
 
         if (cleanGenres.size() <= 1 && !hasQuery) {
@@ -82,9 +85,14 @@ public class MovieService {
             // 나눠서, 500건 밖의 페이지로 가면 빈 목록만 보였습니다).
             String genre = cleanGenres.isEmpty() ? null : cleanGenres.get(0);
             int startCount = (page - 1) * pageSize;
-            FilledPage filled = fetchFilledPage(field, query, genre, releaseDts, releaseDte, pageSize, startCount, kmdbSort);
-            int totalPages = filled.totalCount() == 0 ? 0 : (int) Math.ceil(filled.totalCount() / (double) pageSize);
-            return new MovieSearchResultDto(filled.movies(), page, pageSize, filled.totalCount(), totalPages);
+            FilledPage filled = fetchFilledPage(field, query, genre, releaseDts, releaseDte, runtime, pageSize, startCount, kmdbSort);
+            // 화면에 보이는 건수(nation이 정확히 "대한민국"이고 러닝타임 필터까지 통과한 영화만 센 값)가
+            // 어긋나지 않도록, 이번 페이지 안에서만 계산한 추정치(filled.totalCount()) 대신 전체 카탈로그를
+            // 훑어 캐시해둔 정확한 건수를 씁니다. 아직 캐시가 없으면(첫 조회) 그 추정치를 그대로 보여주고,
+            // 정확한 값은 백그라운드에서 계산되는 대로 다음 요청부터 반영됩니다.
+            int totalCount = movieCountCacheService.getDomesticTotalCount(genre, year, runtime, filled.totalCount());
+            int totalPages = totalCount == 0 ? 0 : (int) Math.ceil(totalCount / (double) pageSize);
+            return new MovieSearchResultDto(filled.movies(), page, pageSize, totalCount, totalPages);
         }
 
         // 검색어가 있거나 장르를 여러 개 고른 경우는 KMDB 응답을 텍스트로 한 번 더 거르거나 여러 번 합쳐야 해서,
@@ -108,6 +116,8 @@ public class MovieService {
             allMovies = toRatedSummaries(matchedItems);
         }
 
+        // 러닝타임은 KMDB 검색 파라미터에 없어 응답을 받은 뒤 직접 거릅니다(500건 한도 안에서만 정확).
+        allMovies = allMovies.stream().filter(movie -> KmdbTextUtils.matchesRuntimeFilter(movie.runtimeMinutes(), runtime)).toList();
         allMovies = sortMovies(allMovies, sort);
 
         int fromIndex = Math.min((page - 1) * pageSize, allMovies.size());
@@ -238,43 +248,56 @@ public class MovieService {
                             Map.Entry::getKey,
                             entry -> new MovieCacheService.MovieSummaryRating(entry.getValue().averageScore(), (int) entry.getValue().reviewCount())
                     ));
-            return movieCacheService.findCachedSummariesInOrder(movieIds, ratingsForCache);
+            // display_order는 스냅샷을 처음 저장할 때(KMDB가 내려준 순서)의 순번이라 제목순이 아닙니다.
+            // 예매 탭/관리자 화면 둘 다 제목 오름차순으로 보여줘야 해서 읽을 때마다 다시 정렬합니다.
+            return sortMovies(movieCacheService.findCachedSummariesInOrder(movieIds, ratingsForCache), "name");
         }
 
         String releaseDte = date.format(KMDB_DATE_FORMAT);
         String releaseDts = date.minusWeeks(4).format(KMDB_DATE_FORMAT);
         // 날짜마다 실제 개봉작 수(KMDB TotalCount)가 다르므로 고정 건수로 자르지 않고, KMDB 한 번 호출 한도
         // (KMDB_MAX_LIST_COUNT)까지 요청해서 그날 "상영중"인 영화 전체를 빠짐없이 받아옵니다.
-        FilledPage filled = fetchFilledPage("title", "", null, releaseDts, releaseDte, KMDB_MAX_LIST_COUNT, 0, null);
+        FilledPage filled = fetchFilledPage("title", "", null, releaseDts, releaseDte, null, KMDB_MAX_LIST_COUNT, 0, null);
+        List<MovieSummaryDto> sorted = sortMovies(filled.movies(), "name");
 
         List<NowShowingSnapshot> toSave = new ArrayList<>();
-        for (int i = 0; i < filled.movies().size(); i++) {
-            toSave.add(new NowShowingSnapshot(date, filled.movies().get(i).id(), i));
+        for (int i = 0; i < sorted.size(); i++) {
+            toSave.add(new NowShowingSnapshot(date, sorted.get(i).id(), i));
         }
         nowShowingSnapshotRepository.saveAll(toSave);
 
-        return filled.movies();
+        return sorted;
     }
 
     private record FilledPage(List<MovieSummaryDto> movies, int totalCount) {
     }
 
-    // KMDB의 startCount/listCount로 이번 페이지 구간을 받아온 뒤 제목 없는 항목이 걸러져서 pageSize보다
-    // 모자라면, 이어지는 구간을 추가로 더 받아와 정확히 pageSize개를 채웁니다. totalCount는 KMDB가 알려주는
-    // 전체 건수에서 "이번 페이지를 채우는 동안" 걸러낸 개수만큼을 뺀 값입니다 - 카탈로그 전체에서 제목 없는
-    // 항목이 정확히 몇 건인지는 몇 만 건을 전부 훑어야 알 수 있어 매 요청마다 계산하지 않으므로, 다른 페이지에서는
-    // 이 보정이 반영되지 않을 수 있습니다(제목 없는 항목 자체가 매우 드물어 실사용에서는 거의 차이가 없습니다).
+    // 최신순 정렬 상위권에 러닝타임이 짧은 단편/독립영화가 몰려있어서, "2시간 이상" 필터처럼 통과율이 아주
+    // 낮은(실측 약 2~3%) 조건은 pageSize만큼만 청해서는 FILL_PAGE_MAX_ATTEMPTS 안에 한 건도 못 채우고
+    // 빈 페이지가 나올 수 있습니다. 러닝타임 필터가 걸려 있을 땐 시도당 요청 건수를 넉넉히 올려(최대 KMDB
+    // 한도까지) 같은 시도 횟수 안에서 더 많은 원본 데이터를 훑도록 합니다.
+    private static final int RUNTIME_FILTERED_FETCH_SIZE = 300;
+
+    // KMDB의 startCount/listCount로 이번 페이지 구간을 받아온 뒤 제목 없는 항목, 해외 공동제작 작품
+    // (isDomesticOnly가 걸러내는, nation이 "대한민국" 단독이 아닌 항목), 러닝타임 필터에 안 맞는 항목이
+    // 걸러져서 pageSize보다 모자라면, 이어지는 구간을 추가로 더 받아와 정확히 pageSize개를 채웁니다.
+    // totalCount는 KMDB가 알려주는 전체 건수에서 "이번 페이지를 채우는 동안" 걸러낸 개수만큼을 뺀 값입니다 -
+    // 카탈로그 전체에서 걸러지는 항목이 정확히 몇 건인지는 몇 만 건을 전부 훑어야 알 수 있어 매 요청마다
+    // 계산하지 않으므로, 다른 페이지에서는 이 보정이 반영되지 않을 수 있습니다.
     private FilledPage fetchFilledPage(
-            String field, String query, String genre, String releaseDts, String releaseDte,
+            String field, String query, String genre, String releaseDts, String releaseDte, String runtime,
             int pageSize, int startCount, String sort
     ) {
         List<MovieSummaryDto> collected = new ArrayList<>();
         int currentStart = startCount;
         int rawTotalCount = 0;
         int skipped = 0;
+        boolean hasRuntimeFilter = runtime != null && !runtime.isBlank();
 
         for (int attempt = 0; attempt < FILL_PAGE_MAX_ATTEMPTS && collected.size() < pageSize; attempt++) {
-            int need = pageSize - collected.size();
+            int need = hasRuntimeFilter
+                    ? RUNTIME_FILTERED_FETCH_SIZE
+                    : pageSize - collected.size();
             KmdbSearchResponse response = searchByField(field, query, genre, releaseDts, releaseDte, need, currentStart, sort);
             if (attempt == 0) {
                 rawTotalCount = response.getTotalCount() == null ? 0 : response.getTotalCount();
@@ -284,7 +307,9 @@ public class MovieService {
                 break;
             }
 
-            List<MovieSummaryDto> filtered = toRatedSummaries(rawItems);
+            List<MovieSummaryDto> filtered = toRatedSummaries(rawItems).stream()
+                    .filter(movie -> KmdbTextUtils.matchesRuntimeFilter(movie.runtimeMinutes(), runtime))
+                    .toList();
             skipped += rawItems.size() - filtered.size();
             collected.addAll(filtered);
             currentStart += rawItems.size();
@@ -295,10 +320,13 @@ public class MovieService {
         }
 
         int totalCount = Math.max(0, rawTotalCount - skipped);
-        return new FilledPage(collected, totalCount);
+        // 러닝타임 필터 때는 시도당 넉넉히 받아오다 보니 한 번에 pageSize보다 많이 모일 수 있어 잘라냅니다.
+        List<MovieSummaryDto> page = collected.size() > pageSize ? collected.subList(0, pageSize) : collected;
+        return new FilledPage(page, totalCount);
     }
 
     private List<MovieSummaryDto> toRatedSummaries(List<KmdbMovieItem> items) {
+        items = items.stream().filter(item -> KmdbTextUtils.isDomesticOnlyNation(item.getNation())).toList();
         List<String> movieIds = items.stream().map(movieMapper::toId).toList();
         Map<String, RatingSummary> ratings = reviewService.getRatingSummaries(movieIds);
 
@@ -347,7 +375,7 @@ public class MovieService {
     // 이지만, 고정 limit이 아니라 실제 페이지네이션(page/pageSize)을 지원하고 장르 조건도 받습니다.
     // minScore를 0으로 두면 평점(1~5)이 하나라도 있는 영화는 전부 대상이 됩니다 - 리뷰가 달린 영화 자체가
     // (장르 필터 없이도) 많지 않을 거라 가정하고 전부 가져와 KMDB 상세를 조회한 뒤 장르를 거릅니다.
-    private MovieSearchResultDto searchByRating(List<String> genres, int page, int pageSize) {
+    private MovieSearchResultDto searchByRating(List<String> genres, String runtime, int page, int pageSize) {
         List<TopRatedMovie> topRated = reviewService.getTopRatedMovies(0);
 
         // topRated가 이미 평점 내림차순이라, 장르로 거르기만 해도 그 순서가 그대로 유지됩니다.
@@ -365,6 +393,9 @@ public class MovieService {
                 // 장르를 하나도 안 골랐으면("전체") 거르지 않고, 골랐으면 그중 하나라도 겹치면 포함합니다
                 // (홈 화면 "취향저격 신작"의 다중 장르 필터와 같은 OR 방식).
                 if (!genres.isEmpty() && genres.stream().noneMatch(genre -> summary.genres().contains(genre))) {
+                    continue;
+                }
+                if (!KmdbTextUtils.matchesRuntimeFilter(summary.runtimeMinutes(), runtime)) {
                     continue;
                 }
                 matched.add(summary);
@@ -391,6 +422,12 @@ public class MovieService {
                         return null;
                     }
                     MovieSummaryDto summary = movieMapper.toSummary(item, averageScore, reviewCount);
+                    // 제목이 특수문자뿐이라 cleanTitle이 null을 돌려준 영화는 movies 테이블의 title이
+                    // NOT NULL이라 그대로 캐시에 저장할 수 없으니, 캐시하지 않고 그냥 null을 돌려줍니다
+                    // (호출 쪽이 이미 title 빈 값을 건너뛰도록 되어있습니다).
+                    if (summary.title() == null || summary.title().isBlank()) {
+                        return null;
+                    }
                     movieCacheService.upsertSummaries(List.of(summary));
                     return summary;
                 });
@@ -414,6 +451,11 @@ public class MovieService {
                 .orElseThrow(() -> new ApiException("영화를 찾을 수 없습니다: " + compositeId, HttpStatus.NOT_FOUND));
 
         MovieDetailDto detail = movieMapper.toDetail(item, averageScore, reviewCount);
+        // 제목이 특수문자뿐이라 cleanTitle이 null을 돌려준 영화는 movies 테이블의 title이 NOT NULL이라
+        // 캐시에 저장할 수 없고, 화면에 보여줄 제목도 없으니 "찾을 수 없음"으로 처리합니다.
+        if (detail.title() == null || detail.title().isBlank()) {
+            throw new ApiException("영화를 찾을 수 없습니다: " + compositeId, HttpStatus.NOT_FOUND);
+        }
         movieCacheService.upsertDetail(detail);
         return detail;
     }

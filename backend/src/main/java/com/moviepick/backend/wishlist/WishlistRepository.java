@@ -11,4 +11,7 @@ public interface WishlistRepository extends JpaRepository<Wishlist, Long> {
     boolean existsByUserIdAndMovieId(Long userId, String movieId);
 
     void deleteByUserIdAndMovieId(Long userId, String movieId);
+
+    // 관리자 "회원 관리" 화면 - 회원별 찜한 영화 수.
+    long countByUserId(Long userId);
 }

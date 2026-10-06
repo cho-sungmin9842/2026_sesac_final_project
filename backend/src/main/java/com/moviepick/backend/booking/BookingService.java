@@ -4,6 +4,7 @@ import com.moviepick.backend.auth.User;
 import com.moviepick.backend.auth.UserRepository;
 import com.moviepick.backend.booking.dto.BookingDto;
 import com.moviepick.backend.booking.dto.BookingRequest;
+import com.moviepick.backend.booking.dto.SeatChangeRequest;
 import com.moviepick.backend.common.ApiException;
 import com.moviepick.backend.movie.Movie;
 import com.moviepick.backend.movie.MovieRepository;
@@ -77,7 +78,11 @@ public class BookingService {
         validateBookingCutoff(screening);
         validateAgeRating(movie, request.ticketCounts());
 
-        List<Seat> seats = seatRepository.findAllById(request.seatIds());
+        // 두 사용자가 동시에 같은 좌석을 예매하지 못하도록, 이 트랜잭션이 끝날 때까지 좌석 행을 잠급니다.
+        // 여러 좌석을 한 번에 잠글 때는 항상 같은 순서(id 오름차순)로 잠가야, 서로 다른 좌석 조합을
+        // 동시에 예매하는 두 요청이 서로를 기다리며 교착(deadlock)되는 상황을 피할 수 있습니다.
+        List<Long> sortedSeatIds = request.seatIds().stream().sorted().toList();
+        List<Seat> seats = seatRepository.findAllByIdForUpdate(sortedSeatIds);
         if (seats.size() != new LinkedHashSet<>(request.seatIds()).size()) {
             throw new ApiException("존재하지 않는 좌석이 포함되어 있습니다.", HttpStatus.BAD_REQUEST);
         }
@@ -148,6 +153,7 @@ public class BookingService {
 
         return new BookingDto(
                 booking.getId(),
+                booking.getScreeningId(),
                 screening != null ? screening.getMovieId() : null,
                 movie != null ? movie.getTitle() : (screening != null ? screening.getMovieId() : "알 수 없음"),
                 screening != null ? screening.getTheater().getName() : "-",
@@ -157,6 +163,59 @@ public class BookingService {
                 booking.getTotalPrice(),
                 booking.getCreatedAt()
         );
+    }
+
+    // 마이페이지 좌석 배치도 다이얼로그 - 내 예매에 포함된 좌석 하나를 아직 비어있는 다른 좌석으로
+    // 바꿉니다. 인원 구분(성인/청소년/어린이/우대)과 요금은 그대로 유지됩니다(좌석 위치가 아니라
+    // 인원 구분에 따라 결정되므로, 관람가 재검증도 필요 없습니다).
+    @Transactional
+    public BookingDto changeSeat(Long userId, Long bookingId, SeatChangeRequest request) {
+        Booking booking = bookingRepository.findById(bookingId)
+                .orElseThrow(() -> new ApiException("예매 내역을 찾을 수 없습니다: " + bookingId, HttpStatus.NOT_FOUND));
+        if (!booking.getUser().getId().equals(userId)) {
+            throw new ApiException("본인의 예매만 좌석을 변경할 수 있습니다.", HttpStatus.FORBIDDEN);
+        }
+
+        Screening screening = screeningRepository.findById(booking.getScreeningId())
+                .orElseThrow(() -> new ApiException("상영정보를 찾을 수 없습니다: " + booking.getScreeningId(), HttpStatus.NOT_FOUND));
+        validateBookingCutoff(screening);
+
+        if (request.fromSeatId().equals(request.toSeatId())) {
+            throw new ApiException("같은 좌석으로는 변경할 수 없습니다.", HttpStatus.BAD_REQUEST);
+        }
+
+        // 두 사용자가 동시에 같은 좌석으로 변경하지 못하도록, 이 트랜잭션이 끝날 때까지 두 좌석 행을
+        // 잠급니다. 항상 id가 작은 쪽부터 잠가야, 서로 반대 방향으로 좌석을 바꾸는 두 요청이 맞물려
+        // 교착(deadlock)되는 상황을 피할 수 있습니다.
+        Long smallerSeatId = Math.min(request.fromSeatId(), request.toSeatId());
+        Long largerSeatId = Math.max(request.fromSeatId(), request.toSeatId());
+        Seat smallerSeat = seatRepository.findByIdForUpdate(smallerSeatId)
+                .orElseThrow(() -> new ApiException("좌석을 찾을 수 없습니다: " + smallerSeatId, HttpStatus.NOT_FOUND));
+        Seat largerSeat = seatRepository.findByIdForUpdate(largerSeatId)
+                .orElseThrow(() -> new ApiException("좌석을 찾을 수 없습니다: " + largerSeatId, HttpStatus.NOT_FOUND));
+        Seat fromSeat = smallerSeatId.equals(request.fromSeatId()) ? smallerSeat : largerSeat;
+        Seat toSeat = smallerSeatId.equals(request.toSeatId()) ? smallerSeat : largerSeat;
+
+        if (!toSeat.getScreeningId().equals(booking.getScreeningId())) {
+            throw new ApiException("다른 상영의 좌석으로는 변경할 수 없습니다.", HttpStatus.BAD_REQUEST);
+        }
+        if (toSeat.getStatus() == SeatStatus.BOOKED) {
+            throw new ApiException("이미 예약된 좌석입니다: " + toSeat.getRowLabel() + toSeat.getColNo(), HttpStatus.CONFLICT);
+        }
+
+        if (!booking.replaceSeat(request.fromSeatId(), request.toSeatId())) {
+            throw new ApiException("이 예매에 포함된 좌석이 아닙니다: " + request.fromSeatId(), HttpStatus.BAD_REQUEST);
+        }
+
+        fromSeat.markAvailable();
+        toSeat.markBooked();
+        seatRepository.saveAll(List.of(fromSeat, toSeat));
+        bookingRepository.save(booking);
+
+        Movie movie = movieRepository.findById(screening.getMovieId()).orElse(null);
+        List<Seat> bookingSeats = seatRepository.findAllById(
+                booking.getSeats().stream().map(BookingSeat::getSeatId).toList());
+        return toDto(booking, screening, bookingSeats, movie);
     }
 
     // 알림 문구에 쓰는 "영화명 상영관 날짜 시간 · 좌석 N석" 요약.
@@ -246,6 +305,7 @@ public class BookingService {
 
         return new BookingDto(
                 booking.getId(),
+                booking.getScreeningId(),
                 screening.getMovieId(),
                 movieTitle,
                 screening.getTheater().getName(),

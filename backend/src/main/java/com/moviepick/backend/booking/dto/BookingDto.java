@@ -6,6 +6,7 @@ import java.util.List;
 
 public record BookingDto(
         Long id,
+        Long screeningId,
         String movieId,
         String movieTitle,
         String theaterName,

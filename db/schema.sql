@@ -77,18 +77,37 @@ CREATE TABLE IF NOT EXISTS watched_movies (
     CONSTRAINT uq_watched_movies_user_movie UNIQUE (user_id, movie_id)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
 
+-- AI 추천 채팅의 "대화방" 단위. 사용자가 "새 대화 시작"을 누르면 메시지를 처음 보낼 때 하나 생기고,
+-- title은 그 첫 메시지를 간단히 줄인 값입니다(ChatGPT 사이드바처럼 왼쪽에서 과거 대화를 구분하는 용도).
+-- last_message_at은 사이드바 목록 정렬(최근 대화가 위로)에 씁니다.
+CREATE TABLE IF NOT EXISTS chat_conversations (
+    id               BIGINT AUTO_INCREMENT PRIMARY KEY,
+    user_id          BIGINT       NOT NULL,
+    title            VARCHAR(100) NULL,
+    created_at       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_message_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_chat_conversations_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
+    INDEX idx_chat_conversations_user_last_message (user_id, last_message_at)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
+
 -- AI 추천 채팅 내역. movie_ids는 그 메시지가 추천한 영화들의 합성 id("{movieId}_{movieSeq}")를 콤마로 이어붙인
 -- 값으로, 화면 재방문 시 KMDB에서 다시 상세를 조회해 추천 카드를 그대로 복원하는 데 씁니다(추천이 아닌
--- 일반 텍스트 메시지는 NULL).
+-- 일반 텍스트 메시지는 NULL). conversation_id로 대화방을 구분하고, user_id는 조회 편의를 위해 그대로 둡니다.
+-- screening_id는 "특정 회차 좌석 현황" 답변일 때만 채워지고(screenings 테이블은 이 파일 뒤쪽에서
+-- 정의되므로, FK는 그 테이블 생성 뒤에 ALTER TABLE로 따로 추가합니다), 그 외에는 NULL입니다.
 CREATE TABLE IF NOT EXISTS chat_messages (
-    id         BIGINT AUTO_INCREMENT PRIMARY KEY,
-    user_id    BIGINT      NOT NULL,
-    role       VARCHAR(10) NOT NULL,
-    content    TEXT        NOT NULL,
-    movie_ids  VARCHAR(500) NULL,
-    created_at DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    id              BIGINT AUTO_INCREMENT PRIMARY KEY,
+    user_id         BIGINT      NOT NULL,
+    conversation_id BIGINT      NOT NULL,
+    role            VARCHAR(10) NOT NULL,
+    content         TEXT        NOT NULL,
+    movie_ids       VARCHAR(500) NULL,
+    screening_id    BIGINT      NULL,
+    created_at      DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_chat_messages_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
-    INDEX idx_chat_messages_user_id (user_id, created_at)
+    CONSTRAINT fk_chat_messages_conversation FOREIGN KEY (conversation_id) REFERENCES chat_conversations (id) ON DELETE CASCADE,
+    INDEX idx_chat_messages_user_id (user_id, created_at),
+    INDEX idx_chat_messages_conversation_id (conversation_id, created_at)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
 
 -- 영화 상세의 "AI 줄거리 요약(스포방지)" 결과 캐시. movie_id는 목록/상세가 쓰는 합성 id("{movieId}_{movieSeq}")
@@ -136,6 +155,19 @@ CREATE TABLE IF NOT EXISTS now_showing_snapshots (
     PRIMARY KEY (snapshot_date, movie_id)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
 
+-- "전체 영화" 목록 화면 상단의 건수 캐시. nation이 정확히 "대한민국" 하나뿐인 영화만 센 정확한 개수를
+-- (장르, 개봉연도, 러닝타임) 조합별로 저장합니다. "전체"는 genre_key/year_key/runtime_key에 "ALL"로
+-- 저장됩니다(러닝타임은 그 외 "under120"/"over120"). KMDB 카탈로그 전체(5만 건 이상)를 매 요청마다
+-- 끝까지 훑을 수 없어, 한 번 계산한 뒤 일정 시간 재사용합니다.
+CREATE TABLE IF NOT EXISTS movie_count_cache (
+    genre_key   VARCHAR(50) NOT NULL,
+    year_key    VARCHAR(10) NOT NULL,
+    runtime_key VARCHAR(10) NOT NULL DEFAULT 'ALL',
+    total_count INT         NOT NULL,
+    computed_at DATETIME    NOT NULL,
+    PRIMARY KEY (genre_key, year_key, runtime_key)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
+
 -- 상영관 마스터 데이터. 1관/2관 두 개만 고정으로 존재합니다.
 CREATE TABLE IF NOT EXISTS theaters (
     id   BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -159,6 +191,12 @@ CREATE TABLE IF NOT EXISTS screenings (
     INDEX idx_screenings_movie_date (movie_id, date),
     INDEX idx_screenings_theater_date_start (theater_id, date, start_time)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
+
+-- chat_messages.screening_id는 screenings보다 먼저 정의돼서 FK를 여기서 따로 겁니다. 상영정보가
+-- 삭제돼도(주간 배치가 지난 회차를 갈아치우는 경우는 없지만 혹시 몰라) 채팅 기록 자체는 남아있어야
+-- 하므로 CASCADE 대신 SET NULL입니다 - 그 메시지는 그냥 좌석 배치도만 다시 못 보여줄 뿐입니다.
+ALTER TABLE chat_messages
+    ADD CONSTRAINT fk_chat_messages_screening FOREIGN KEY (screening_id) REFERENCES screenings (id) ON DELETE SET NULL;
 
 -- 상영 1건당 좌석(8행 A~H x 14열 = 112석, A열은 전부 휠체어석). 상영정보 생성 배치가 상영정보와 함께
 -- 만들고, 실제 예매 상황을 흉내 내려고 약 15%는 미리 BOOKED로 채워둡니다.

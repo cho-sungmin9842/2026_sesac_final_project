@@ -52,4 +52,9 @@ public class Seat {
     public void markBooked() {
         this.status = SeatStatus.BOOKED;
     }
+
+    // 좌석변경으로 비워진 좌석을 다시 AVAILABLE로 되돌립니다.
+    public void markAvailable() {
+        this.status = SeatStatus.AVAILABLE;
+    }
 }

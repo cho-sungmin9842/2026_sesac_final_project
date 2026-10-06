@@ -142,10 +142,6 @@ public class MovieMapper {
     }
 
     private Integer toRuntime(String runtime) {
-        String cleaned = KmdbTextUtils.clean(runtime);
-        if (cleaned == null || !cleaned.matches("\\d+")) {
-            return null;
-        }
-        return Integer.parseInt(cleaned);
+        return KmdbTextUtils.parseRuntimeMinutes(runtime);
     }
 }

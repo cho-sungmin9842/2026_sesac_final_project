@@ -54,17 +54,12 @@ function FilterSidebar({ filters, onChange, onToggleGenre }) {
         getLabel={genreLabel}
       />
       <YearSelect options={years} active={filters.year} onSelect={(value) => onChange('year', value)} />
-      <div>
-        <FilterGroup
-          title="러닝타임"
-          options={runtimeFilters}
-          isActive={(option) => filters.runtime === option}
-          onSelect={(value) => onChange('runtime', value)}
-        />
-        {filters.runtime !== '전체' && (
-          <p className="mt-2 text-xs text-gray-500">현재 페이지에 불러온 결과에만 적용됩니다.</p>
-        )}
-      </div>
+      <FilterGroup
+        title="러닝타임"
+        options={runtimeFilters}
+        isActive={(option) => filters.runtime === option}
+        onSelect={(value) => onChange('runtime', value)}
+      />
     </aside>
   )
 }

@@ -13,6 +13,7 @@ import MovieCard from '../../components/common/MovieCard'
 import WriteReviewDialog from '../MovieDetail/components/WriteReviewDialog'
 import AiTasteReport from './components/AiTasteReport'
 import ProfileHeader from './components/ProfileHeader'
+import BookingSeatMapDialog from './components/BookingSeatMapDialog'
 
 const TABS = ['예매 내역', '찜한 영화', '시청완료', '내가 쓴 리뷰']
 // "전체"는 필터 전용 옵션이라 개인 취향 선택지에서는 뺍니다.
@@ -25,6 +26,13 @@ function formatJoinedAt(createdAt) {
   const mm = String(date.getMonth() + 1).padStart(2, '0')
   const dd = String(date.getDate()).padStart(2, '0')
   return `${yyyy}.${mm}.${dd}`
+}
+
+// 상영이 이미 끝난 예매는 좌석 정보는 그대로 보여주되, 눌러서 좌석 배치도/변경 다이얼로그를 열 수는
+// 없게 합니다(이미 끝난 상영의 좌석을 바꾸는 건 의미가 없으니까요).
+function isPastShowing(booking) {
+  if (!booking.showDate || !booking.showtime) return false
+  return new Date(`${booking.showDate}T${booking.showtime}`) < new Date()
 }
 
 function formatShortDate(isoString) {
@@ -134,7 +142,7 @@ function SavedGenresDialog({ onClose }) {
   )
 }
 
-function MyBookingList({ bookings, isLoading }) {
+function MyBookingList({ bookings, isLoading, onSeatClick }) {
   if (isLoading) {
     return <p className="text-sm text-gray-500">불러오는 중...</p>
   }
@@ -143,30 +151,52 @@ function MyBookingList({ bookings, isLoading }) {
   }
   return (
     <div className="space-y-3">
-      {bookings.map((booking) => (
-        <div key={booking.id} className="rounded-lg bg-slate-900 p-4">
-          <div className="flex items-center justify-between">
-            {booking.movieId ? (
-              <Link
-                to={`/movies/${booking.movieId}`}
-                className="text-sm font-semibold text-gray-200 hover:text-white hover:underline"
-              >
-                {booking.movieTitle}
-              </Link>
-            ) : (
-              <span className="text-sm font-semibold text-gray-200">{booking.movieTitle}</span>
-            )}
-            <span className="text-xs text-gray-500">{formatShortDate(booking.createdAt)} 예매</span>
+      {bookings.map((booking) => {
+        const isPast = isPastShowing(booking)
+        return (
+          <div key={booking.id} className="rounded-lg bg-slate-900 p-4">
+            <div className="flex items-center justify-between">
+              {booking.movieId ? (
+                <Link
+                  to={`/movies/${booking.movieId}`}
+                  className="text-sm font-semibold text-gray-200 hover:text-white hover:underline"
+                >
+                  {booking.movieTitle}
+                </Link>
+              ) : (
+                <span className="text-sm font-semibold text-gray-200">{booking.movieTitle}</span>
+              )}
+              <span className="text-xs text-gray-500">{formatShortDate(booking.createdAt)} 예매</span>
+            </div>
+            <p className="mt-1 text-xs text-gray-400">
+              {booking.theaterName} · {booking.showDate} {booking.showtime}
+              {isPast && <span className="ml-2 text-gray-600">(상영 종료)</span>}
+            </p>
+            <div className="mt-2 flex items-center justify-between text-sm">
+              <span className="flex flex-wrap items-center gap-x-1 text-gray-300">
+                좌석{' '}
+                {booking.seats.map((seat, index) => (
+                  <span key={seat}>
+                    {isPast ? (
+                      <span className="font-semibold text-gray-400">{seat}</span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => onSeatClick(booking)}
+                        className="font-semibold text-indigo-300 hover:text-indigo-200 hover:underline"
+                      >
+                        {seat}
+                      </button>
+                    )}
+                    {index < booking.seats.length - 1 && ','}
+                  </span>
+                ))}
+              </span>
+              <span className="font-semibold text-white">{booking.totalPrice.toLocaleString()}원</span>
+            </div>
           </div>
-          <p className="mt-1 text-xs text-gray-400">
-            {booking.theaterName} · {booking.showDate} {booking.showtime}
-          </p>
-          <div className="mt-2 flex items-center justify-between text-sm">
-            <span className="text-gray-300">좌석 {booking.seats.join(', ')}</span>
-            <span className="font-semibold text-white">{booking.totalPrice.toLocaleString()}원</span>
-          </div>
-        </div>
-      ))}
+        )
+      })}
     </div>
   )
 }
@@ -225,9 +255,15 @@ function MyPage() {
   const [savedGenres, setSavedGenres] = useState([])
   const [savingGenres, setSavingGenres] = useState(false)
   const [showSavedDialog, setShowSavedDialog] = useState(false)
+  const [seatMapBooking, setSeatMapBooking] = useState(null)
 
   const refreshMyReviews = () => {
     getMyReviews(user.id).then(setMyReviews)
+  }
+
+  // 좌석변경에 성공하면 예매 내역의 좌석 번호 표시도 최신 상태로 맞춥니다.
+  const refreshBookings = () => {
+    getMyBookings(user.id).then(setBookings)
   }
 
   useEffect(() => {
@@ -363,7 +399,9 @@ function MyPage() {
       </div>
 
       <div className="mt-6">
-        {activeTab === '예매 내역' && <MyBookingList bookings={bookings} isLoading={bookingsLoading} />}
+        {activeTab === '예매 내역' && (
+          <MyBookingList bookings={bookings} isLoading={bookingsLoading} onSeatClick={setSeatMapBooking} />
+        )}
         {activeTab === '찜한 영화' && (
           <MoviePosterGrid
             movies={visibleWishlistMovies}
@@ -393,6 +431,15 @@ function MyPage() {
       )}
 
       {showSavedDialog && <SavedGenresDialog onClose={() => setShowSavedDialog(false)} />}
+
+      {seatMapBooking && (
+        <BookingSeatMapDialog
+          booking={seatMapBooking}
+          userId={user.id}
+          onClose={() => setSeatMapBooking(null)}
+          onSeatChanged={refreshBookings}
+        />
+      )}
     </div>
   )
 }

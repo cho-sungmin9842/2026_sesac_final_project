@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import MovieCard from '../../components/common/MovieCard'
 import { searchMovies } from '../../api/movieApi'
@@ -7,7 +7,6 @@ import Pagination from './components/Pagination'
 import SortDropdown from './components/SortDropdown'
 
 const PAGE_SIZE = 15
-const RUNTIME_LIMIT_MINUTES = 120
 const SORT_OPTIONS = [
   { value: 'latest', label: '최신순' },
   { value: 'name', label: '이름순' },
@@ -45,10 +44,10 @@ function MovieListPage() {
     })
   }
 
-  // 검색어/검색대상/장르/연도/정렬이 바뀌면 1페이지부터 다시 봅니다.
+  // 검색어/검색대상/장르/연도/러닝타임/정렬이 바뀌면 1페이지부터 다시 봅니다.
   useEffect(() => {
     setPage(1)
-  }, [query, field, filters.genres, filters.year, sort])
+  }, [query, field, filters.genres, filters.year, filters.runtime, sort])
 
   useEffect(() => {
     let cancelled = false
@@ -57,6 +56,7 @@ function MovieListPage() {
     searchMovies(query, {
       genre: filters.genres,
       year: filters.year === '전체' ? undefined : filters.year,
+      runtime: filters.runtime,
       sort,
       page,
       pageSize: PAGE_SIZE,
@@ -76,23 +76,11 @@ function MovieListPage() {
     return () => {
       cancelled = true
     }
-  }, [query, field, filters.genres, filters.year, sort, page])
+  }, [query, field, filters.genres, filters.year, filters.runtime, sort, page])
 
-  // 정렬(최신순/이름순)은 이제 백엔드가 카탈로그 전체 기준으로 미리 정렬해서 내려줍니다.
-  // 러닝타임만 KMDB 검색 API에 해당 파라미터가 없어 현재 페이지 결과 안에서 클라이언트 필터링합니다.
-  const visibleMovies = useMemo(() => {
-    if (filters.runtime === '2시간 미만') {
-      return result.movies.filter(
-        (movie) => movie.runtimeMinutes != null && movie.runtimeMinutes < RUNTIME_LIMIT_MINUTES,
-      )
-    }
-    if (filters.runtime === '2시간 이상') {
-      return result.movies.filter(
-        (movie) => movie.runtimeMinutes != null && movie.runtimeMinutes >= RUNTIME_LIMIT_MINUTES,
-      )
-    }
-    return result.movies
-  }, [result.movies, filters.runtime])
+  // 장르/연도/러닝타임/정렬 모두 백엔드가 직접 걸러서 내려주므로(러닝타임도 totalCount에 반영됨),
+  // 받은 결과를 그대로 보여줍니다.
+  const visibleMovies = result.movies
 
   const heading = query ? `"${query}" 검색 결과` : '전체 영화'
 

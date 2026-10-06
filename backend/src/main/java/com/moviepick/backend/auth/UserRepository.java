@@ -13,4 +13,7 @@ public interface UserRepository extends JpaRepository<User, Long> {
 
     // 예매 완료 알림을 전원에게 보낼 관리자 목록.
     List<User> findByAdminTrue();
+
+    // 관리자 "회원 관리" 화면 - 최근 가입자부터 보여줍니다.
+    List<User> findAllByOrderByCreatedAtDesc();
 }

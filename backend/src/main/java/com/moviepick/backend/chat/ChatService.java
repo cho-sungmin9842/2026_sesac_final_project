@@ -6,9 +6,14 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.moviepick.backend.auth.User;
 import com.moviepick.backend.auth.UserRepository;
+import com.moviepick.backend.booking.BookingService;
+import com.moviepick.backend.booking.dto.BookingDto;
+import com.moviepick.backend.booking.dto.BookingRequest;
+import com.moviepick.backend.chat.dto.ChatConversationDto;
 import com.moviepick.backend.chat.dto.ChatMessageDto;
 import com.moviepick.backend.chat.dto.ChatRequestDto;
 import com.moviepick.backend.chat.dto.ChatResponseDto;
+import com.moviepick.backend.chat.dto.SeatStatusDto;
 import com.moviepick.backend.common.ApiException;
 import com.moviepick.backend.movie.MovieService;
 import com.moviepick.backend.movie.dto.ActorDto;
@@ -16,17 +21,23 @@ import com.moviepick.backend.movie.dto.MovieDetailDto;
 import com.moviepick.backend.movie.dto.MovieSummaryDto;
 import com.moviepick.backend.screening.Screening;
 import com.moviepick.backend.screening.ScreeningRepository;
+import com.moviepick.backend.screening.Seat;
+import com.moviepick.backend.screening.SeatRepository;
+import com.moviepick.backend.screening.SeatStatus;
+import com.moviepick.backend.screening.dto.SeatDto;
 import com.moviepick.backend.wishlist.WishlistService;
 import com.moviepick.backend.wishlist.dto.WishlistRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.stream.Collectors;
 
@@ -58,43 +69,68 @@ public class ChatService {
             "전쟁", "지역", "청춘영화", "코메디", "판타지", "하이틴(고교)"
     );
 
+    // 대화 제목(사이드바 표시용)은 그 대화의 첫 메시지를 이 길이로 줄입니다(ChatGPT 사이드바와 비슷한 길이).
+    private static final int TITLE_MAX_LENGTH = 24;
+
     private final GeminiClient geminiClient;
     private final MovieService movieService;
     private final ChatMessageRepository chatMessageRepository;
+    private final ChatConversationRepository chatConversationRepository;
     private final UserRepository userRepository;
     private final ObjectMapper objectMapper;
     private final WishlistService wishlistService;
     private final ScreeningRepository screeningRepository;
+    private final SeatRepository seatRepository;
+    private final BookingService bookingService;
 
     public ChatService(
             GeminiClient geminiClient,
             MovieService movieService,
             ChatMessageRepository chatMessageRepository,
+            ChatConversationRepository chatConversationRepository,
             UserRepository userRepository,
             ObjectMapper objectMapper,
             WishlistService wishlistService,
-            ScreeningRepository screeningRepository
+            ScreeningRepository screeningRepository,
+            SeatRepository seatRepository,
+            BookingService bookingService
     ) {
         this.geminiClient = geminiClient;
         this.movieService = movieService;
         this.chatMessageRepository = chatMessageRepository;
+        this.chatConversationRepository = chatConversationRepository;
         this.userRepository = userRepository;
         this.objectMapper = objectMapper;
         this.wishlistService = wishlistService;
         this.screeningRepository = screeningRepository;
+        this.seatRepository = seatRepository;
+        this.bookingService = bookingService;
     }
 
-    // 저장된 대화 내역을 시간순으로 돌려줍니다. 추천 메시지는 movie_ids로 KMDB 상세를 다시 조회해
-    // 추천 카드까지 그대로 복원합니다.
-    public List<ChatMessageDto> history(Long userId) {
-        return chatMessageRepository.findByUserIdOrderByCreatedAtAsc(userId).stream()
-                .map(message -> new ChatMessageDto(message.getRole(), message.getContent(), moviesFrom(message.getMovieIds())))
+    // AI 추천 사이드바 - 이 사용자의 대화방 목록을 최근 대화가 위로 오도록 돌려줍니다.
+    public List<ChatConversationDto> listConversations(Long userId) {
+        return chatConversationRepository.findByUserIdOrderByLastMessageAtDesc(userId).stream()
+                .map(c -> new ChatConversationDto(c.getId(), c.getTitle(), c.getCreatedAt(), c.getLastMessageAt()))
                 .toList();
     }
 
-    // "새 대화 시작" - 이 사용자의 저장된 대화를 전부 지웁니다.
-    public void clearHistory(Long userId) {
-        chatMessageRepository.deleteByUserId(userId);
+    // 사이드바에서 과거 대화방을 클릭했을 때 그 대화방의 메시지 내역을 시간순으로 돌려줍니다. 추천 메시지는
+    // movie_ids로 KMDB 상세를 다시 조회해 추천 카드까지 그대로 복원합니다. 좌석 현황 답변은 screening_id로
+    // 다시 조회하는데, 그 안에서 Screening.theater를 읽어야 해서(지연 로딩) 트랜잭션 안에서 실행해야 합니다.
+    @Transactional(readOnly = true)
+    public List<ChatMessageDto> historyForConversation(Long userId, Long conversationId) {
+        ChatConversation conversation = requireOwnedConversation(userId, conversationId);
+        return chatMessageRepository.findByConversationIdOrderByCreatedAtAsc(conversation.getId()).stream()
+                .map(message -> new ChatMessageDto(
+                        message.getRole(), message.getContent(), moviesFrom(message.getMovieIds()),
+                        seatStatusFrom(message.getScreeningId())))
+                .toList();
+    }
+
+    // AI 추천 사이드바에서 대화방을 우클릭 삭제했을 때 - 메시지는 FK ON DELETE CASCADE로 함께 지워집니다.
+    public void deleteConversation(Long userId, Long conversationId) {
+        ChatConversation conversation = requireOwnedConversation(userId, conversationId);
+        chatConversationRepository.delete(conversation);
     }
 
     private List<MovieSummaryDto> moviesFrom(String movieIds) {
@@ -125,24 +161,50 @@ public class ChatService {
         }
     }
 
+    // 새 대화의 첫 메시지(request.conversationId()가 없음)부터 메시지 저장까지 한 트랜잭션 안에서
+    // 처리해야 "대화방 생성 -> 메시지 저장 -> last_message_at 갱신"이 중간에 끊기지 않습니다
+    // (open-in-view: false라 트랜잭션 밖에서 엔티티를 다루면 "No EntityManager with actual transaction
+    // available" 류의 오류가 날 수 있습니다).
+    @Transactional
     public ChatResponseDto reply(Long userId, ChatRequestDto request) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new ApiException("로그인이 필요합니다.", HttpStatus.UNAUTHORIZED));
 
-        List<ChatMessage> fullHistory = chatMessageRepository.findByUserIdOrderByCreatedAtAsc(userId);
+        ChatConversation conversation = request.conversationId() == null
+                ? startConversation(user, request.message())
+                : requireOwnedConversation(userId, request.conversationId());
+
+        List<ChatMessage> fullHistory = chatMessageRepository.findByConversationIdOrderByCreatedAtAsc(conversation.getId());
 
         // "찜해줘"는 Gemini 판단이 필요 없는 결정적 동작이라, 조건 추출 자체를 거치지 않고 바로 처리합니다.
         // 다만 "찜 안 하고 싶어"처럼 부정/취소 표현이 섞여 있으면 이 결정적 분기를 건너뛰고 일반 조건
         // 추출로 넘깁니다(그래야 진짜 의도에 맞게 답할 수 있습니다).
         if (WISHLIST_HINT.matcher(request.message()).find() && !WISHLIST_NEGATION_HINT.matcher(request.message()).find()) {
-            return handleWishlistRequest(user, request.message(), fullHistory);
+            return handleWishlistRequest(user, conversation, request.message(), fullHistory);
         }
 
         // "지금 상영중인 영화" 요청도 Gemini의 ExtractedFilter(연도 전체 단위 필터만 있고 "최근 개봉일자
         // 범위" 개념이 없음)로는 제대로 답할 수 없어서, 예매 화면과 같은 실제 "상영중" 로직(MovieService.
-        // getNowShowing, 최근 4주 개봉작)으로 바로 처리합니다.
-        if (NOW_SHOWING_HINT.matcher(request.message()).find()) {
-            return handleNowShowingRequest(user, request.message());
+        // getNowShowing, 최근 4주 개봉작)으로 바로 처리합니다. 다만 "상영 중인 영화 아가미의 상영정보를
+        // 알려줘"처럼 특정 영화를 콕 집어 그 영화의 상영 스케줄을 물어본 거라면(SCREENING_QUESTION_HINT도
+        // 함께 매치), 이 "전체 목록" 분기가 가로채지 않고 아래 movie_question 경로로 흘러가야 합니다 -
+        // 안 그러면 특정 영화 질문인데도 항상 "지금 상영중인 영화 N편" 목록으로 엉뚱하게 답하는 버그가
+        // 있었습니다.
+        if (NOW_SHOWING_HINT.matcher(request.message()).find()
+                && !SCREENING_QUESTION_HINT.matcher(request.message()).find()) {
+            return handleNowShowingRequest(user, conversation, request.message());
+        }
+
+        // "10/11(일) 2관: 20:05 예매 좌석 현황을 알려줘"처럼 직전에 안내한 특정 회차의 좌석 현황을 물어보는
+        // 요청도 날짜/상영관/시간이 전부 숫자 패턴이라 Gemini 없이 정규식으로 바로 처리합니다.
+        if (SEAT_STATUS_HINT.matcher(request.message()).find()) {
+            return handleSeatStatusRequest(user, conversation, request.message(), fullHistory);
+        }
+
+        // "성인 2명 D열 2,3번을 예매해줘"처럼 인원 구분과 좌석을 직접 말하며 예매를 요청하면, 바로 위에서
+        // 안내한(또는 좌석 현황을 물어봤던) 회차를 기준으로 Gemini 없이 바로 실제 예매를 생성합니다.
+        if (BOOKING_REQUEST_HINT.matcher(request.message()).find()) {
+            return handleBookingRequest(user, conversation, request.message(), fullHistory);
         }
 
         List<GeminiClient.ChatTurn> history = toGeminiTurns(lastN(fullHistory, MAX_HISTORY_TURNS_FOR_EXTRACTION));
@@ -168,7 +230,7 @@ public class ChatService {
         // 끼워 맞추지 않고, 서비스 용도를 안내하는 답으로 바로 응답합니다.
         if ("off_topic".equals(filter.intent())) {
             String reply = pickOffTopicReply();
-            return persistTurn(user, request.message(), reply, List.of());
+            return persistTurn(user, conversation, request.message(), reply, List.of());
         }
 
         // "영화 추천해줘"가 아니라 "그 영화 장르/배우 알려줘"처럼 이미 나온(또는 대화 맥락 속) 특정 영화에 대한
@@ -178,9 +240,9 @@ public class ChatService {
         // 정보만 줘서, "상영 정보 알려줘"라고 물어도 장르/감독/배우만 나오는 버그가 있었습니다).
         if ("movie_question".equals(filter.intent()) && filter.query() != null) {
             if (SCREENING_QUESTION_HINT.matcher(request.message()).find()) {
-                return answerScreeningQuestion(user, request.message(), filter.query());
+                return answerScreeningQuestion(user, conversation, request.message(), filter.query());
             }
-            return answerMovieQuestion(user, request.message(), filter.query());
+            return answerMovieQuestion(user, conversation, request.message(), filter.query());
         }
 
         // "이 영화와 같은 장르로"처럼 이전에 나온 영화를 기준 삼으라고 했으면, Gemini에게 그 영화의 장르를
@@ -196,7 +258,30 @@ public class ChatService {
                 ? "말씀하신 조건에 맞는 국내 영화를 찾지 못했어요. 장르나 연도 조건을 조금 완화해서 다시 물어봐주시겠어요?"
                 : buildReply(effectiveFilter, candidates);
 
-        return persistTurn(user, request.message(), reply, candidates);
+        return persistTurn(user, conversation, request.message(), reply, candidates);
+    }
+
+    // "새 대화 시작" 뒤 첫 메시지 - 대화방을 새로 만들고 제목은 그 메시지를 간단히 줄인 값으로 둡니다.
+    private ChatConversation startConversation(User user, String firstMessage) {
+        return chatConversationRepository.save(new ChatConversation(user, deriveTitle(firstMessage)));
+    }
+
+    private ChatConversation requireOwnedConversation(Long userId, Long conversationId) {
+        ChatConversation conversation = chatConversationRepository.findById(conversationId)
+                .orElseThrow(() -> new ApiException("대화를 찾을 수 없습니다.", HttpStatus.NOT_FOUND));
+        if (!conversation.isOwnedBy(userId)) {
+            throw new ApiException("본인의 대화만 이용할 수 있습니다.", HttpStatus.FORBIDDEN);
+        }
+        return conversation;
+    }
+
+    // Gemini를 따로 부르지 않고(호출 비용 절약), 첫 메시지를 공백만 정리해 적당한 길이로 자릅니다.
+    private String deriveTitle(String firstMessage) {
+        String cleaned = firstMessage == null ? "" : firstMessage.trim().replaceAll("\\s+", " ");
+        if (cleaned.isEmpty()) {
+            return "새 대화";
+        }
+        return cleaned.length() <= TITLE_MAX_LENGTH ? cleaned : cleaned.substring(0, TITLE_MAX_LENGTH) + "...";
     }
 
     private ExtractedFilter resolveReferenceGenre(ExtractedFilter filter, List<ChatMessage> fullHistory) {
@@ -260,7 +345,7 @@ public class ChatService {
     // 다시 조회해 첫 번째 장르 태그를 대표 장르로 씁니다.
     private String resolveGenreByTitleSearch(String referenceTitle) {
         List<MovieSummaryDto> matches =
-                movieService.search(referenceTitle, List.of(), null, "latest", 1, 1, "title").movies();
+                movieService.search(referenceTitle, List.of(), null, null, "latest", 1, 1, "title").movies();
         if (matches.isEmpty() || matches.get(0).genres().isEmpty()) {
             return null;
         }
@@ -269,18 +354,18 @@ public class ChatService {
 
     // ---- 특정 영화에 대한 질문(장르/배우/감독/줄거리 등) ----
 
-    private ChatResponseDto answerMovieQuestion(User user, String userMessage, String movieTitle) {
-        List<MovieSummaryDto> matches = movieService.search(movieTitle, List.of(), null, "latest", 1, 1, "title").movies();
+    private ChatResponseDto answerMovieQuestion(User user, ChatConversation conversation, String userMessage, String movieTitle) {
+        List<MovieSummaryDto> matches = movieService.search(movieTitle, List.of(), null, null, "latest", 1, 1, "title").movies();
         if (matches.isEmpty()) {
             String reply = "'%s' 영화를 찾지 못했어요. 정확한 제목으로 다시 물어봐주시겠어요?".formatted(movieTitle);
-            return persistTurn(user, userMessage, reply, List.of());
+            return persistTurn(user, conversation, userMessage, reply, List.of());
         }
 
         String[] idParts = matches.get(0).id().split("_", 2);
         MovieDetailDto detail = movieService.getDetail(idParts[0], idParts[1]);
         String reply = describeMovieDetail(detail);
 
-        return persistTurn(user, userMessage, reply, List.of(matches.get(0)));
+        return persistTurn(user, conversation, userMessage, reply, List.of(matches.get(0)));
     }
 
     private static final java.util.regex.Pattern SCREENING_QUESTION_HINT = java.util.regex.Pattern.compile(
@@ -289,11 +374,11 @@ public class ChatService {
     // 실제 상영 스케줄(상영관/날짜/시간)로 답합니다 - 장르/감독/배우 같은 일반 정보(describeMovieDetail)와는
     // 다른 질문이라 구분해서 처리합니다. 예매 화면과 완전히 같은 데이터 소스(screenings 테이블, 매주
     // 월요일 자정 배치가 생성)를 그대로 써서 실제 예매 가능한 회차만 보여줍니다.
-    private ChatResponseDto answerScreeningQuestion(User user, String userMessage, String movieTitle) {
-        List<MovieSummaryDto> matches = movieService.search(movieTitle, List.of(), null, "latest", 1, 1, "title").movies();
+    private ChatResponseDto answerScreeningQuestion(User user, ChatConversation conversation, String userMessage, String movieTitle) {
+        List<MovieSummaryDto> matches = movieService.search(movieTitle, List.of(), null, null, "latest", 1, 1, "title").movies();
         if (matches.isEmpty()) {
             String reply = "'%s' 영화를 찾지 못했어요. 정확한 제목으로 다시 물어봐주시겠어요?".formatted(movieTitle);
-            return persistTurn(user, userMessage, reply, List.of());
+            return persistTurn(user, conversation, userMessage, reply, List.of());
         }
 
         MovieSummaryDto movie = matches.get(0);
@@ -301,11 +386,11 @@ public class ChatService {
         if (screenings.isEmpty()) {
             String reply = "'%s'의 이번 주 상영 정보가 없어요. 상영이 종료됐거나 이번 주에는 편성되지 않았을 수 있어요."
                     .formatted(movie.title());
-            return persistTurn(user, userMessage, reply, List.of(movie));
+            return persistTurn(user, conversation, userMessage, reply, List.of(movie));
         }
 
         String reply = "'%s' 상영 정보예요.\n%s".formatted(movie.title(), describeScreenings(screenings));
-        return persistTurn(user, userMessage, reply, List.of(movie));
+        return persistTurn(user, conversation, userMessage, reply, List.of(movie));
     }
 
     private static final String[] KOREAN_WEEKDAYS = {"월", "화", "수", "목", "금", "토", "일"};
@@ -346,10 +431,22 @@ public class ChatService {
                 - 러닝타임: %s""".formatted(detail.title(), detail.year(), genres, directors, actors, runtime);
     }
 
-    private ChatResponseDto persistTurn(User user, String userMessage, String reply, List<MovieSummaryDto> movies) {
-        chatMessageRepository.save(new ChatMessage(user, "user", userMessage, null));
-        chatMessageRepository.save(new ChatMessage(user, "ai", reply, joinIds(movies)));
-        return new ChatResponseDto(reply, movies);
+    private ChatResponseDto persistTurn(
+            User user, ChatConversation conversation, String userMessage, String reply, List<MovieSummaryDto> movies
+    ) {
+        return persistTurn(user, conversation, userMessage, reply, movies, null);
+    }
+
+    private ChatResponseDto persistTurn(
+            User user, ChatConversation conversation, String userMessage, String reply,
+            List<MovieSummaryDto> movies, SeatStatusDto seatStatus
+    ) {
+        Long screeningId = seatStatus == null ? null : seatStatus.screeningId();
+        chatMessageRepository.save(new ChatMessage(user, conversation.getId(), "user", userMessage, null, null));
+        chatMessageRepository.save(new ChatMessage(user, conversation.getId(), "ai", reply, joinIds(movies), screeningId));
+        conversation.touch();
+        chatConversationRepository.save(conversation);
+        return new ChatResponseDto(conversation.getId(), reply, movies, seatStatus);
     }
 
     private String joinIds(List<MovieSummaryDto> movies) {
@@ -528,7 +625,7 @@ public class ChatService {
                 movies = searchNonEmpty(filter.query(), genres, filter.year(), "director", limit);
             }
         } else {
-            movies = movieService.search("", genres, filter.year(), "latest", 1, limit * 3, "title").movies();
+            movies = movieService.search("", genres, filter.year(), null, "latest", 1, limit * 3, "title").movies();
         }
 
         return movies.stream()
@@ -558,7 +655,7 @@ public class ChatService {
     }
 
     private List<MovieSummaryDto> searchNonEmpty(String query, List<String> genres, String year, String field, int limit) {
-        return movieService.search(query, genres, year, "latest", 1, limit * 3, field).movies();
+        return movieService.search(query, genres, year, null, "latest", 1, limit * 3, field).movies();
     }
 
     private boolean matchesRuntime(MovieSummaryDto movie, Integer runtimeMaxMinutes) {
@@ -700,11 +797,13 @@ public class ChatService {
     // "이 영화 찜해줘"처럼 직전에 추천받은 영화를 찜 목록에 담아달라는 요청은 판단이 필요한 게 아니라 그냥
     // 실행하면 되는 결정적인 동작이라, Gemini에게 물어보지 않고 정규식으로 바로 처리합니다(API 호출도
     // 아끼고, "장르가 뭐야" 같은 recommend/movie_question 분류로 잘못 새는 것도 원천 차단됩니다).
-    private ChatResponseDto handleWishlistRequest(User user, String userMessage, List<ChatMessage> fullHistory) {
+    private ChatResponseDto handleWishlistRequest(
+            User user, ChatConversation conversation, String userMessage, List<ChatMessage> fullHistory
+    ) {
         List<MovieSummaryDto> movies = lastRecommendedMovies(fullHistory);
         if (movies.isEmpty()) {
             String reply = "먼저 추천받은 영화가 있어야 찜할 수 있어요! 어떤 영화를 찾아드릴까요?";
-            return persistTurn(user, userMessage, reply, List.of());
+            return persistTurn(user, conversation, userMessage, reply, List.of());
         }
         for (MovieSummaryDto movie : movies) {
             wishlistService.add(user.getId(), new WishlistRequest(movie.id(), movie.title(), movie.posterUrl()));
@@ -715,7 +814,7 @@ public class ChatService {
         // 찜하기 확인 메시지에는 영화 카드 목록을 다시 붙이지 않습니다 - movies를 그대로 넘기면
         // ChatMovieRecommendation이 방금 봤던 추천 카드 그리드를 통째로 다시 그려서, 화면상 방금 추천
         // 답변과 거의 구분이 안 되는 문제가 있었습니다(사용자가 "안 고쳐졌다"고 재차 신고한 원인).
-        return persistTurn(user, userMessage, reply, List.of());
+        return persistTurn(user, conversation, userMessage, reply, List.of());
     }
 
     private static final java.util.regex.Pattern NOW_SHOWING_HINT = java.util.regex.Pattern.compile("상영\\s*중");
@@ -724,16 +823,218 @@ public class ChatService {
     // 전체"만 표현할 수 있지 "최근 개봉일자 범위(상영중)" 개념이 없어서, 이 요청도 조건 추출을 거치지 않고
     // 예매 화면의 "상영중인 영화" 목록과 같은 기준(MovieService.getNowShowing, 최근 4주 개봉작)으로 바로
     // 답합니다.
-    private ChatResponseDto handleNowShowingRequest(User user, String userMessage) {
+    private ChatResponseDto handleNowShowingRequest(User user, ChatConversation conversation, String userMessage) {
         List<MovieSummaryDto> movies = movieService.getNowShowing(DEFAULT_RECOMMENDATIONS).movies();
         if (movies.isEmpty()) {
             String reply = "지금 상영중인 국내 영화를 찾지 못했어요.";
-            return persistTurn(user, userMessage, reply, List.of());
+            return persistTurn(user, conversation, userMessage, reply, List.of());
         }
         String titles = movies.stream().map(MovieSummaryDto::title).collect(Collectors.joining(", "));
         String reply = "지금 상영중인 영화로 %s %s 찾았어요! 마음에 드는 작품을 골라보세요 🍿\n영화 포스터를 클릭하시면 자세한 영화 정보를 보실 수 있습니다."
                 .formatted(titles, movies.size() > 1 ? "등 %d편을".formatted(movies.size()) : "을(를)");
-        return persistTurn(user, userMessage, reply, movies);
+        return persistTurn(user, conversation, userMessage, reply, movies);
+    }
+
+    private static final java.util.regex.Pattern SEAT_STATUS_HINT = java.util.regex.Pattern.compile(
+            "좌석\\s*(현황|상태)|예매\\s*가능한\\s*좌석|빈\\s*(자리|좌석)|남은\\s*좌석");
+    private static final java.util.regex.Pattern DATE_FRAGMENT = java.util.regex.Pattern.compile("(\\d{1,2})\\s*/\\s*(\\d{1,2})");
+    private static final java.util.regex.Pattern THEATER_FRAGMENT = java.util.regex.Pattern.compile("(\\d+)\\s*관");
+    private static final java.util.regex.Pattern TIME_FRAGMENT = java.util.regex.Pattern.compile("(\\d{1,2})\\s*:\\s*(\\d{2})");
+
+    // "10/11(일) 2관: 20:05 예매 좌석 현황을 알려줘"처럼, 직전에 안내한 상영정보 목록에서 특정 회차를
+    // 콕 집어 좌석 현황을 물어본 요청입니다. 날짜/상영관/시간이 전부 숫자 패턴이라 Gemini 없이 정규식
+    // 으로 바로 그 회차를 찾아 실제 seats 테이블 상태로 답합니다. 어떤 영화인지는 말하지 않는 게 보통이라
+    // (바로 위에서 그 영화 얘기를 하고 있었으니까), 직전에 실제로 다뤘던 영화를 그대로 기준으로 삼습니다.
+    private ChatResponseDto handleSeatStatusRequest(
+            User user, ChatConversation conversation, String userMessage, List<ChatMessage> fullHistory
+    ) {
+        String lastMovieId = lastRecommendedMovieId(fullHistory);
+        if (lastMovieId == null) {
+            String reply = "어떤 영화의 좌석 현황인지 알 수 없어요. 먼저 영화 이름을 말씀해주시거나 상영정보를 물어봐주세요.";
+            return persistTurn(user, conversation, userMessage, reply, List.of());
+        }
+
+        java.util.regex.Matcher dateMatcher = DATE_FRAGMENT.matcher(userMessage);
+        java.util.regex.Matcher theaterMatcher = THEATER_FRAGMENT.matcher(userMessage);
+        java.util.regex.Matcher timeMatcher = TIME_FRAGMENT.matcher(userMessage);
+        if (!dateMatcher.find() || !theaterMatcher.find() || !timeMatcher.find()) {
+            String reply = "몇 월 며칠, 몇 관, 몇 시 회차인지 알려주시면 좌석 현황을 확인해드릴게요. (예: \"10/11 2관 20:05 좌석 현황 알려줘\")";
+            return persistTurn(user, conversation, userMessage, reply, List.of());
+        }
+
+        int month = Integer.parseInt(dateMatcher.group(1));
+        int day = Integer.parseInt(dateMatcher.group(2));
+        String theaterLabel = theaterMatcher.group(1) + "관";
+        String timeLabel = "%02d:%02d".formatted(Integer.parseInt(timeMatcher.group(1)), Integer.parseInt(timeMatcher.group(2)));
+
+        List<Screening> screenings = screeningRepository.findByMovieIdOrderByDateAscStartTimeAsc(lastMovieId);
+        Screening match = screenings.stream()
+                .filter(s -> s.getDate().getMonthValue() == month && s.getDate().getDayOfMonth() == day)
+                .filter(s -> s.getTheater().getName().equals(theaterLabel))
+                .filter(s -> s.getStartTime().toString().startsWith(timeLabel))
+                .findFirst()
+                .orElse(null);
+
+        if (match == null) {
+            String reply = "%d/%d %s %s 회차를 찾지 못했어요. 상영정보를 다시 확인해주시겠어요?"
+                    .formatted(month, day, theaterLabel, timeLabel);
+            return persistTurn(user, conversation, userMessage, reply, List.of());
+        }
+
+        SeatStatusDto seatStatus = toSeatStatus(match);
+        String reply = "'%s' %s %s %s 회차 좌석 현황이에요.\n전체 %d석 중 %d석 예매 가능해요(%d석 예매 완료)."
+                .formatted(seatStatus.movieTitle(), seatStatus.dateLabel(), seatStatus.theaterName(), seatStatus.timeLabel(),
+                        seatStatus.totalSeats(), seatStatus.availableSeats(), seatStatus.totalSeats() - seatStatus.availableSeats());
+
+        return persistTurn(user, conversation, userMessage, reply, List.of(), seatStatus);
+    }
+
+    // 저장된 메시지를 다시 불러올 때, screening_id 하나로 좌석 현황을 그대로 복원합니다.
+    private SeatStatusDto seatStatusFrom(Long screeningId) {
+        if (screeningId == null) {
+            return null;
+        }
+        return screeningRepository.findById(screeningId).map(this::toSeatStatus).orElse(null);
+    }
+
+    private SeatStatusDto toSeatStatus(Screening screening) {
+        List<Seat> seats = seatRepository.findByScreeningIdOrderByRowLabelAscColNoAsc(screening.getId());
+        int totalSeats = seats.size();
+        int bookedSeats = (int) seats.stream().filter(seat -> seat.getStatus() == SeatStatus.BOOKED).count();
+        List<SeatDto> seatDtos = seats.stream().map(seat -> SeatDto.from(seat, false)).toList();
+
+        return new SeatStatusDto(
+                screening.getId(),
+                movieTitleOrId(screening.getMovieId()),
+                screening.getTheater().getName(),
+                formatDateLabel(screening.getDate()),
+                screening.getStartTime().toString().substring(0, 5),
+                totalSeats,
+                totalSeats - bookedSeats,
+                seatDtos
+        );
+    }
+
+    private String movieTitleOrId(String compositeMovieId) {
+        String[] parts = compositeMovieId.split("_", 2);
+        if (parts.length != 2) {
+            return compositeMovieId;
+        }
+        try {
+            return movieService.getDetail(parts[0], parts[1]).title();
+        } catch (Exception e) {
+            return compositeMovieId;
+        }
+    }
+
+    private String formatDateLabel(LocalDate date) {
+        String weekday = KOREAN_WEEKDAYS[date.getDayOfWeek().getValue() - 1];
+        return "%d/%d(%s)".formatted(date.getMonthValue(), date.getDayOfMonth(), weekday);
+    }
+
+    private static final java.util.regex.Pattern BOOKING_REQUEST_HINT = java.util.regex.Pattern.compile(
+            "예매\\s*(해\\s*줘|해\\s*주세요|좀|할게|할래|하고\\s*싶어|해줄래)|결제\\s*(해\\s*줘|해\\s*주세요)");
+    // "D열 2,3번"처럼 한 행(row) 안의 여러 열(column)을 한 번에 가리키는 표현.
+    private static final java.util.regex.Pattern SEAT_ROW_GROUP = java.util.regex.Pattern.compile(
+            "([A-Ha-h])\\s*열\\s*([0-9]+(?:\\s*,\\s*[0-9]+)*)\\s*번?");
+    // "D2", "d 3"처럼 행+열을 붙여 쓰는 표현(여러 행에 걸친 좌석도 이걸로 잡습니다).
+    private static final java.util.regex.Pattern SEAT_PAIR = java.util.regex.Pattern.compile("([A-Ha-h])\\s*(\\d{1,2})");
+    private static final Map<String, String> TICKET_LABEL_TO_CATEGORY =
+            Map.of("성인", "adult", "청소년", "teen", "어린이", "child", "우대", "senior");
+
+    // 직전에 좌석 현황을 안내했던(또는 상영정보로 회차를 짚었던) screening_id를 찾습니다 - "예매해줘"에는
+    // 보통 회차를 다시 말하지 않으니, 바로 위 맥락에서 가리키는 회차를 그대로 기준 삼습니다.
+    private Long lastSeatStatusScreeningId(List<ChatMessage> fullHistory) {
+        for (int i = fullHistory.size() - 1; i >= 0; i--) {
+            ChatMessage message = fullHistory.get(i);
+            if ("ai".equals(message.getRole()) && message.getScreeningId() != null) {
+                return message.getScreeningId();
+            }
+        }
+        return null;
+    }
+
+    // "D열 2,3번" 또는 "D2, D3"처럼 메시지에 섞인 좌석 표기를 "D2", "D3" 같은 라벨 목록으로 뽑아냅니다.
+    private List<String> parseSeatLabels(String message) {
+        java.util.regex.Matcher rowGroupMatcher = SEAT_ROW_GROUP.matcher(message);
+        if (rowGroupMatcher.find()) {
+            String row = rowGroupMatcher.group(1).toUpperCase(Locale.ROOT);
+            List<String> labels = new ArrayList<>();
+            for (String colText : rowGroupMatcher.group(2).split(",")) {
+                labels.add(row + colText.trim());
+            }
+            return labels;
+        }
+
+        List<String> labels = new ArrayList<>();
+        java.util.regex.Matcher pairMatcher = SEAT_PAIR.matcher(message);
+        while (pairMatcher.find()) {
+            labels.add(pairMatcher.group(1).toUpperCase(Locale.ROOT) + pairMatcher.group(2));
+        }
+        return labels;
+    }
+
+    private ChatResponseDto handleBookingRequest(
+            User user, ChatConversation conversation, String userMessage, List<ChatMessage> fullHistory
+    ) {
+        Long screeningId = lastSeatStatusScreeningId(fullHistory);
+        if (screeningId == null) {
+            String reply = "어떤 회차를 예매할지 알 수 없어요. 먼저 영화의 상영정보나 좌석 현황을 확인해주세요.";
+            return persistTurn(user, conversation, userMessage, reply, List.of());
+        }
+
+        Map<String, Integer> ticketCounts = new LinkedHashMap<>();
+        for (Map.Entry<String, String> entry : TICKET_LABEL_TO_CATEGORY.entrySet()) {
+            java.util.regex.Matcher matcher =
+                    java.util.regex.Pattern.compile(entry.getKey() + "\\s*(\\d+)\\s*명").matcher(userMessage);
+            if (matcher.find()) {
+                ticketCounts.put(entry.getValue(), Integer.parseInt(matcher.group(1)));
+            }
+        }
+        List<String> seatLabels = parseSeatLabels(userMessage);
+
+        if (ticketCounts.isEmpty() || seatLabels.isEmpty()) {
+            String reply = "예매하실 인원 구분(성인/청소년/어린이/우대)과 좌석을 함께 말씀해주세요. "
+                    + "(예: \"성인 2명 D열 2,3번 예매해줘\")";
+            return persistTurn(user, conversation, userMessage, reply, List.of());
+        }
+
+        List<Seat> seatsOnScreening = seatRepository.findByScreeningIdOrderByRowLabelAscColNoAsc(screeningId);
+        Map<String, Long> seatIdByLabel = seatsOnScreening.stream()
+                .collect(Collectors.toMap(seat -> seat.getRowLabel() + seat.getColNo(), Seat::getId));
+
+        List<Long> seatIds = new ArrayList<>();
+        List<String> notFound = new ArrayList<>();
+        for (String label : seatLabels) {
+            Long seatId = seatIdByLabel.get(label);
+            if (seatId == null) {
+                notFound.add(label);
+            } else {
+                seatIds.add(seatId);
+            }
+        }
+        if (!notFound.isEmpty()) {
+            String reply = "존재하지 않는 좌석이에요: " + String.join(", ", notFound);
+            return persistTurn(user, conversation, userMessage, reply, List.of());
+        }
+
+        int totalTickets = ticketCounts.values().stream().mapToInt(Integer::intValue).sum();
+        if (totalTickets != seatIds.size()) {
+            String reply = "인원 수(%d명)와 좌석 수(%d석)가 맞지 않아요. 다시 확인해주시겠어요?"
+                    .formatted(totalTickets, seatIds.size());
+            return persistTurn(user, conversation, userMessage, reply, List.of());
+        }
+
+        try {
+            BookingDto booking = bookingService.create(user.getId(), new BookingRequest(screeningId, seatIds, ticketCounts));
+            String reply = "예매와 결제가 완료됐어요! 🎬\n'%s' %s %s %s\n좌석: %s · %s원\n예매 확인 알림을 보내드렸어요."
+                    .formatted(
+                            booking.movieTitle(), booking.theaterName(), booking.showDate(), booking.showtime(),
+                            String.join(", ", booking.seats()), "%,d".formatted(booking.totalPrice()));
+            return persistTurn(user, conversation, userMessage, reply, List.of());
+        } catch (ApiException e) {
+            return persistTurn(user, conversation, userMessage, e.getMessage(), List.of());
+        }
     }
 
     private static final java.util.regex.Pattern MORE_HINT =

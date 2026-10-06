@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../../auth/AuthContext'
-import { clearChatHistory, getChatHistory, sendChatMessage } from '../../api/chatApi'
+import { deleteConversation, getConversationMessages, getConversations, sendChatMessage } from '../../api/chatApi'
 import ChatBubble from './components/ChatBubble'
 import ChatMovieRecommendation from './components/ChatMovieRecommendation'
+import ChatConversationSidebar from './components/ChatConversationSidebar'
+import ChatSeatStatus from './components/ChatSeatStatus'
 
 const QUICK_REPLIES = [
   '같은 장르의 영화들을 추천해줘',
@@ -21,9 +23,12 @@ function formatToday() {
 
 const GREETING = { id: 0, from: 'ai', type: 'text', content: '안녕하세요! 저는 새싹무비 AI 큐레이터예요 🎬 오늘 어떤 영화를 찾아드릴까요?' }
 
-// DB에 저장된 메시지(role/content/movies)를 화면에서 쓰는 메시지 형태로 바꿉니다.
+// DB에 저장된 메시지(role/content/movies/seatStatus)를 화면에서 쓰는 메시지 형태로 바꿉니다.
 function fromSavedMessage(saved, id) {
   const from = saved.role === 'user' ? 'user' : 'ai'
+  if (from === 'ai' && saved.seatStatus) {
+    return { id, from, type: 'seatStatus', analysis: saved.content, seatStatus: saved.seatStatus }
+  }
   if (from === 'ai' && saved.movies.length > 0) {
     return { id, from, type: 'recommendation', analysis: saved.content, movies: saved.movies }
   }
@@ -47,31 +52,71 @@ function TypingIndicator() {
 
 function AiChatPage() {
   const { user } = useAuth()
+  const [conversations, setConversations] = useState([])
+  const [isLoadingConversations, setIsLoadingConversations] = useState(true)
+  // null이면 아직 메시지를 한 번도 보내지 않은 "새 대화" 상태입니다(서버에 대화방이 없고, 첫 메시지를
+  // 보내야 비로소 생깁니다).
+  const [activeConversationId, setActiveConversationId] = useState(null)
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
   const [isLoadingHistory, setIsLoadingHistory] = useState(true)
   const [isSending, setIsSending] = useState(false)
   const nextId = useRef(1)
   const bottomRef = useRef(null)
+  // sendMessage가 새로 만들어진 conversationId를 activeConversationId에 반영할 때, 그 대화의 메시지는
+  // 이미 화면에 다 있으므로 바로 아래 effect가 서버에서 또 불러오지 않도록 막는 플래그입니다.
+  const skipNextFetchRef = useRef(false)
 
   // 접속 시점의 실제 날짜를 그때그때 반영해야 하니, 고정 배열이 아니라 렌더링마다 새로 만듭니다.
   const quickReplies = [...QUICK_REPLIES, `오늘(${formatToday()} 기준) 상영중인 영화를 찾아줘`]
 
+  // 대화방 목록을 불러와서, 지난 대화가 있으면 가장 최근 대화를 이어서 보여주고(원래 하던 대로 "이어서
+  // 계속하기"), 하나도 없는 완전히 새 사용자일 때만 인사말을 보여줍니다.
   useEffect(() => {
     let cancelled = false
-    getChatHistory(user.id)
+    getConversations(user.id)
+      .then((list) => {
+        if (cancelled) return
+        setConversations(list)
+        if (list.length > 0) {
+          setActiveConversationId(list[0].id)
+        } else {
+          setMessages([GREETING])
+          setIsLoadingHistory(false)
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setMessages([GREETING])
+          setIsLoadingHistory(false)
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoadingConversations(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [user.id])
+
+  // activeConversationId가 바뀔 때마다(사이드바 클릭, 또는 첫 메시지로 새 대화방이 막 생겼을 때) 그
+  // 대화방의 메시지를 불러옵니다.
+  useEffect(() => {
+    if (activeConversationId == null) return undefined
+    if (skipNextFetchRef.current) {
+      skipNextFetchRef.current = false
+      return undefined
+    }
+
+    let cancelled = false
+    setIsLoadingHistory(true)
+    getConversationMessages(user.id, activeConversationId)
       .then((saved) => {
         if (cancelled) return
-        // 저장된 대화가 있으면 그것만 보여주고(인사말을 또 앞에 붙이지 않음), 없을 때만(새 사용자) 인사말을 보여줍니다.
-        if (saved.length === 0) {
-          setMessages([GREETING])
-          return
-        }
-        const loaded = saved.map((item) => fromSavedMessage(item, nextId.current++))
+        const loaded = saved.length === 0 ? [GREETING] : saved.map((item) => fromSavedMessage(item, nextId.current++))
         setMessages(loaded)
       })
       .catch(() => {
-        // 이전 대화를 못 불러와도 새 대화는 계속할 수 있어야 하니, 인사말만 보여주고 조용히 넘어갑니다.
         if (!cancelled) setMessages([GREETING])
       })
       .finally(() => {
@@ -80,7 +125,7 @@ function AiChatPage() {
     return () => {
       cancelled = true
     }
-  }, [user.id])
+  }, [user.id, activeConversationId])
 
   // 메시지가 추가될 때마다 맨 아래로 스크롤합니다(새 답변이 와도 사용자가 직접 내릴 필요 없게).
   useEffect(() => {
@@ -98,16 +143,28 @@ function AiChatPage() {
     setIsSending(true)
 
     try {
-      const { reply, movies } = await sendChatMessage(user.id, trimmed)
+      const { conversationId, reply, movies, seatStatus } = await sendChatMessage(user.id, activeConversationId, trimmed)
+      if (conversationId !== activeConversationId) {
+        // 새 대화의 첫 메시지라 서버가 방금 대화방을 만든 경우입니다 - 메시지는 이미 화면에 있으니
+        // 아래 "대화방 전환" effect가 다시 불러오지 않도록 막아둡니다.
+        skipNextFetchRef.current = true
+        setActiveConversationId(conversationId)
+      }
       setMessages((prev) =>
         prev.map((message) =>
           message.id !== loadingMessageId
             ? message
-            : movies.length > 0
-              ? { id: loadingMessageId, from: 'ai', type: 'recommendation', analysis: reply, movies }
-              : { id: loadingMessageId, from: 'ai', type: 'text', content: reply },
+            : seatStatus
+              ? { id: loadingMessageId, from: 'ai', type: 'seatStatus', analysis: reply, seatStatus }
+              : movies.length > 0
+                ? { id: loadingMessageId, from: 'ai', type: 'recommendation', analysis: reply, movies }
+                : { id: loadingMessageId, from: 'ai', type: 'text', content: reply },
         ),
       )
+      // 사이드바 제목/순서(최근 대화가 위로)를 최신 상태로 맞춥니다.
+      getConversations(user.id)
+        .then(setConversations)
+        .catch(() => {})
     } catch (error) {
       setMessages((prev) =>
         prev.map((message) =>
@@ -132,86 +189,117 @@ function AiChatPage() {
     sendMessage(input)
   }
 
-  const handleNewConversation = async () => {
+  // "새 대화 시작" - 지난 대화는 그대로 두고(사이드바에서 언제든 다시 볼 수 있음), 화면만 빈 새 대화로
+  // 바꿉니다. 서버에는 첫 메시지를 보낼 때 비로소 대화방이 생기므로, 여기서는 별도 API 호출이 없습니다.
+  const handleNewConversation = () => {
     if (isSending) return
-    if (!window.confirm('지금까지의 대화 내역을 전부 지우고 새로 시작할까요?')) return
+    setActiveConversationId(null)
+    setMessages([GREETING])
+    nextId.current = 1
+  }
+
+  const handleSelectConversation = (conversationId) => {
+    if (isSending || conversationId === activeConversationId) return
+    setActiveConversationId(conversationId)
+  }
+
+  // 사이드바 우클릭 메뉴의 "삭제" - 지금 보고 있던 대화방을 지웠으면 화면을 빈 새 대화로 되돌립니다.
+  const handleDeleteConversation = async (conversationId) => {
+    if (!window.confirm('이 대화를 삭제할까요?')) return
     try {
-      await clearChatHistory(user.id)
-      nextId.current = 1
-      setMessages([GREETING])
+      await deleteConversation(user.id, conversationId)
+      setConversations((prev) => prev.filter((conversation) => conversation.id !== conversationId))
+      if (conversationId === activeConversationId) {
+        setActiveConversationId(null)
+        setMessages([GREETING])
+      }
     } catch (error) {
       window.alert(error.message)
     }
   }
 
   return (
-    <div className="mx-auto flex h-[calc(100svh-64px)] max-w-4xl flex-col px-6 py-6">
-      <div className="mb-3 flex items-center justify-between">
-        <h1 className="text-lg font-bold text-gray-100">AI 추천</h1>
-        <button
-          type="button"
-          onClick={handleNewConversation}
-          className="rounded-lg border border-gray-700 px-3 py-1.5 text-xs text-gray-300 hover:bg-slate-800"
-        >
-          새 대화 시작
-        </button>
-      </div>
+    <div className="mx-auto flex h-[calc(100svh-64px)] max-w-6xl gap-4 px-6 py-6">
+      <ChatConversationSidebar
+        conversations={conversations}
+        activeConversationId={activeConversationId}
+        onSelect={handleSelectConversation}
+        onDelete={handleDeleteConversation}
+        isLoading={isLoadingConversations}
+      />
 
-      <div className="flex-1 space-y-4 overflow-y-auto pb-4">
-        {isLoadingHistory && <p className="text-xs text-gray-500">이전 대화를 불러오는 중...</p>}
-        {messages.map((message) =>
-          message.type === 'recommendation' ? (
-            <ChatBubble key={message.id} from={message.from}>
-              <ChatMovieRecommendation analysis={message.analysis} movies={message.movies} />
-            </ChatBubble>
-          ) : message.type === 'loading' ? (
-            <ChatBubble key={message.id} from={message.from}>
-              <TypingIndicator />
-            </ChatBubble>
-          ) : (
-            <ChatBubble key={message.id} from={message.from} isError={message.isError}>
-              {message.content}
-            </ChatBubble>
-          ),
-        )}
-        <div ref={bottomRef} />
-      </div>
-
-      <div className="mb-3 flex flex-wrap gap-2">
-        {quickReplies.map((reply) => (
+      <div className="flex min-w-0 flex-1 flex-col">
+        <div className="mb-3 flex items-center justify-between">
+          <h1 className="text-lg font-bold text-gray-100">AI 추천</h1>
           <button
-            key={reply}
             type="button"
-            disabled={isSending}
-            onClick={() => sendMessage(reply)}
-            className="rounded-full border border-gray-700 px-3 py-1.5 text-xs text-gray-300 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
+            onClick={handleNewConversation}
+            className="rounded-lg border border-gray-700 px-3 py-1.5 text-xs text-gray-300 hover:bg-slate-800"
           >
-            {reply}
+            새 대화 시작
           </button>
-        ))}
-      </div>
+        </div>
 
-      <form onSubmit={handleSubmit} className="flex gap-2">
-        <input
-          value={input}
-          onChange={(event) => setInput(event.target.value)}
-          type="text"
-          disabled={isSending}
-          placeholder="메시지를 입력하세요..."
-          className="flex-1 rounded-lg bg-slate-900 px-4 py-3 text-sm text-gray-100 placeholder:text-gray-500 focus:outline-none disabled:opacity-60"
-        />
-        <button
-          type="submit"
-          disabled={isSending}
-          className="flex w-11 items-center justify-center rounded-lg bg-indigo-600 text-white hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {isSending ? (
-            <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
-          ) : (
-            '➤'
+        <div className="flex-1 space-y-4 overflow-y-auto pb-4">
+          {isLoadingHistory && <p className="text-xs text-gray-500">이전 대화를 불러오는 중...</p>}
+          {messages.map((message) =>
+            message.type === 'recommendation' ? (
+              <ChatBubble key={message.id} from={message.from}>
+                <ChatMovieRecommendation analysis={message.analysis} movies={message.movies} />
+              </ChatBubble>
+            ) : message.type === 'seatStatus' ? (
+              <ChatBubble key={message.id} from={message.from}>
+                <ChatSeatStatus seatStatus={message.seatStatus} />
+              </ChatBubble>
+            ) : message.type === 'loading' ? (
+              <ChatBubble key={message.id} from={message.from}>
+                <TypingIndicator />
+              </ChatBubble>
+            ) : (
+              <ChatBubble key={message.id} from={message.from} isError={message.isError}>
+                {message.content}
+              </ChatBubble>
+            ),
           )}
-        </button>
-      </form>
+          <div ref={bottomRef} />
+        </div>
+
+        <div className="mb-3 flex flex-wrap gap-2">
+          {quickReplies.map((reply) => (
+            <button
+              key={reply}
+              type="button"
+              disabled={isSending}
+              onClick={() => sendMessage(reply)}
+              className="rounded-full border border-gray-700 px-3 py-1.5 text-xs text-gray-300 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {reply}
+            </button>
+          ))}
+        </div>
+
+        <form onSubmit={handleSubmit} className="flex gap-2">
+          <input
+            value={input}
+            onChange={(event) => setInput(event.target.value)}
+            type="text"
+            disabled={isSending}
+            placeholder="메시지를 입력하세요..."
+            className="flex-1 rounded-lg bg-slate-900 px-4 py-3 text-sm text-gray-100 placeholder:text-gray-500 focus:outline-none disabled:opacity-60"
+          />
+          <button
+            type="submit"
+            disabled={isSending}
+            className="flex w-11 items-center justify-center rounded-lg bg-indigo-600 text-white hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isSending ? (
+              <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+            ) : (
+              '➤'
+            )}
+          </button>
+        </form>
+      </div>
     </div>
   )
 }

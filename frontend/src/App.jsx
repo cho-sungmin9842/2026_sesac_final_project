@@ -11,6 +11,7 @@ import PaymentSuccessPage from './pages/Payment/PaymentSuccessPage'
 import PaymentFailPage from './pages/Payment/PaymentFailPage'
 import MyPage from './pages/MyPage/MyPage'
 import AdminReportsPage from './pages/Admin/AdminReportsPage'
+import AdminMembersPage from './pages/Admin/AdminMembersPage'
 import AdminScreeningsPage from './pages/Admin/AdminScreeningsPage'
 import LoginPage from './pages/Auth/LoginPage'
 import SignupPage from './pages/Auth/SignupPage'
@@ -50,6 +51,7 @@ function App() {
       >
         <Route index element={<Navigate to="reports" replace />} />
         <Route path="reports" element={<AdminReportsPage />} />
+        <Route path="members" element={<AdminMembersPage />} />
         <Route path="screenings" element={<AdminScreeningsPage />} />
       </Route>
     </Routes>

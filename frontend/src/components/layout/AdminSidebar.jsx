@@ -3,10 +3,9 @@ import { useAuth } from '../../auth/AuthContext'
 
 const ADMIN_LINKS = [
   { to: '/admin', label: '대시보드', icon: '📊' },
-  { to: '/admin/reports', label: '리뷰 신고 관리', icon: '🚩' },
+  { to: '/admin/reports', label: '리뷰 관리', icon: '🚩' },
   { to: '/admin/members', label: '회원 관리', icon: '👤' },
-  { to: '/admin/tmdb-sync', label: 'TMDB 동기화', icon: '🎞️' },
-  { to: '/admin/screenings', label: '예매/상영관', icon: '🎟️' },
+  { to: '/admin/screenings', label: '예매/상영관 현황', icon: '🎟️' },
 ]
 
 function AdminSidebar() {

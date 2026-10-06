@@ -31,13 +31,15 @@ public class MovieController {
             @RequestParam(defaultValue = "") String query,
             @RequestParam(required = false) List<String> genre,
             @RequestParam(required = false) String year,
+            // "under120"/"over120" 둘 중 하나거나, 필터 없음("전체")은 생략됩니다.
+            @RequestParam(required = false) String runtime,
             @RequestParam(defaultValue = "latest") String sort,
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(defaultValue = "20") int pageSize,
             // 검색창의 영화/배우/감독 드롭다운 선택값. KMDB 파라미터명과 동일하게 title/actor/director를 받습니다.
             @RequestParam(defaultValue = "title") String field
     ) {
-        return movieService.search(query, genre, year, sort, page, pageSize, field);
+        return movieService.search(query, genre, year, runtime, sort, page, pageSize, field);
     }
 
     /**

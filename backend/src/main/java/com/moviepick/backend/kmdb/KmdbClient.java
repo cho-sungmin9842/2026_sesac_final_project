@@ -30,8 +30,10 @@ public class KmdbClient {
 
     private static final String COLLECTION = "kmdb_new2";
     private static final int RESPONSE_PREVIEW_LENGTH = 300;
-    // 해외 영화는 서비스에서 다루지 않으므로, KMDB가 지원하는 nation 파라미터(부분일치, 공동제작도
-    // "대한민국"이 포함되어 있으면 걸림)로 검색 단계에서부터 국내 영화만 받아옵니다.
+    // 해외 영화는 서비스에서 다루지 않으므로, KMDB가 지원하는 nation 파라미터로 검색 단계에서부터
+    // 1차로 걸러냅니다. 다만 이 파라미터는 부분일치라 "대한민국,미국"처럼 해외와의 공동제작도 통과시키므로
+    // (예: 미키 17, 위쳐: 세이렌의 바다), nation이 정확히 "대한민국" 하나뿐인 항목만 남기는 2차 필터링은
+    // MovieService.isDomesticOnly()가 담당합니다.
     private static final String DOMESTIC_NATION = "대한민국";
 
     private final RestClient kmdbRestClient;

@@ -49,7 +49,7 @@ function AdminReportsPage() {
   return (
     <div className="px-8 py-6">
       <div className="mb-6 flex items-center justify-between">
-        <h1 className="text-xl font-bold text-white">리뷰 신고 관리</h1>
+        <h1 className="text-xl font-bold text-white">리뷰 관리</h1>
         <span className="rounded-md bg-slate-900 px-3 py-1.5 text-sm text-gray-300">
           오늘 작성 {todayCount}건
         </span>
