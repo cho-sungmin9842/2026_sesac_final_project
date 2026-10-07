@@ -26,6 +26,7 @@ import com.moviepick.backend.screening.SeatRepository;
 import com.moviepick.backend.screening.SeatStatus;
 import com.moviepick.backend.screening.dto.SeatDto;
 import com.moviepick.backend.wishlist.WishlistService;
+import com.moviepick.backend.wishlist.dto.WishlistDto;
 import com.moviepick.backend.wishlist.dto.WishlistRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -176,9 +177,16 @@ public class ChatService {
 
         List<ChatMessage> fullHistory = chatMessageRepository.findByConversationIdOrderByCreatedAtAsc(conversation.getId());
 
+        // "여름 너머, 취준생 찜해제해줘"처럼 찜 목록에서 빼달라는 요청은 반대로 실제 삭제를 해야 하므로,
+        // "찜해줘"(추가) 분기보다 먼저 확인합니다 - 둘 다 "찜"이 들어있어서 순서가 바뀌면 삭제 요청이
+        // 추가 분기에 먼저 걸려 엉뚱하게 "찜했습니다"로 답하는 버그가 있었습니다.
+        if (WISHLIST_REMOVE_HINT.matcher(request.message()).find()) {
+            return handleWishlistRemoveRequest(user, conversation, request.message());
+        }
+
         // "찜해줘"는 Gemini 판단이 필요 없는 결정적 동작이라, 조건 추출 자체를 거치지 않고 바로 처리합니다.
-        // 다만 "찜 안 하고 싶어"처럼 부정/취소 표현이 섞여 있으면 이 결정적 분기를 건너뛰고 일반 조건
-        // 추출로 넘깁니다(그래야 진짜 의도에 맞게 답할 수 있습니다).
+        // 다만 "찜 안 하고 싶어"처럼 부정 표현이 섞여 있으면 이 결정적 분기를 건너뛰고 일반 조건 추출로
+        // 넘깁니다(그래야 진짜 의도에 맞게 답할 수 있습니다).
         if (WISHLIST_HINT.matcher(request.message()).find() && !WISHLIST_NEGATION_HINT.matcher(request.message()).find()) {
             return handleWishlistRequest(user, conversation, request.message(), fullHistory);
         }
@@ -338,6 +346,16 @@ public class ChatService {
             return false;
         }
         return movieTitle.replaceAll("\\s+", "").equalsIgnoreCase(referenceTitle.replaceAll("\\s+", ""));
+    }
+
+    // "레이디 두아 찜해줘"처럼 사용자 메시지 안에 추천 목록 중 한 편의 제목이 그대로 들어있으면 그 영화를
+    // 콕 집은 것으로 봅니다(공백 차이는 titleMatches와 같은 이유로 무시). 여러 편 제목이 동시에 언급되는
+    // 경우는 고려하지 않고 첫 번째로 일치하는 한 편만 반환합니다.
+    private java.util.Optional<MovieSummaryDto> findMentionedMovie(String userMessage, List<MovieSummaryDto> movies) {
+        String normalizedMessage = userMessage.replaceAll("\\s+", "");
+        return movies.stream()
+                .filter(movie -> movie.title() != null && normalizedMessage.contains(movie.title().replaceAll("\\s+", "")))
+                .findFirst();
     }
 
     // referenceTitle이 직전 추천 목록에 없었을 때(예: movie_question으로 영화 한 편만 얘기하다가 "이 영화와
@@ -788,11 +806,18 @@ public class ChatService {
     }
 
     private static final java.util.regex.Pattern WISHLIST_HINT = java.util.regex.Pattern.compile("찜");
-    // "찜 안 하고 싶어"/"찜 말고"/"찜 취소해줘"처럼 "찜"이 들어가도 실제로는 찜을 하지 말라는(또는 찜과
-    // 무관한) 뜻이면 찜 처리로 바로 새지 않도록, 근처에 부정/취소 표현이 있으면 이 결정적 분기를 건너뛰고
-    // 일반 조건 추출(Gemini)로 넘깁니다.
+    // "찜 안 하고 싶어"/"찜 말고"처럼 "찜"이 들어가도 실제로는 찜을 하지 말라는(또는 찜과 무관한) 뜻이면
+    // 찜 처리로 바로 새지 않도록, 근처에 순수 부정 표현이 있으면 이 결정적 분기를 건너뛰고 일반 조건
+    // 추출(Gemini)로 넘깁니다. "취소"/"빼"/"해제"는 실제로는 "찜 목록에서 빼달라"는 삭제 요청이라
+    // WISHLIST_REMOVE_HINT가 따로 처리하므로 여기서는 뺐습니다(예전엔 여기 같이 있어서 삭제 요청이
+    // 삭제도 추가도 안 되고 그냥 Gemini에게 넘어가버리는 문제가 있었습니다).
     private static final java.util.regex.Pattern WISHLIST_NEGATION_HINT =
-            java.util.regex.Pattern.compile("찜.{0,4}(안|말고|말아|하지\\s*마|취소|빼)|(안|말고|하지\\s*마).{0,4}찜");
+            java.util.regex.Pattern.compile("찜.{0,4}(안|말고|말아|하지\\s*마)|(안|말고|하지\\s*마).{0,4}찜");
+
+    // "여름 너머, 취준생 찜 해제해줘"/"찜 취소해줘"/"찜 목록에서 빼줘"처럼 이미 찜한 영화를 목록에서
+    // 지워달라는 요청입니다. WISHLIST_HINT(추가)보다 먼저 확인해야 "찜해줘"로 오인되지 않습니다.
+    private static final java.util.regex.Pattern WISHLIST_REMOVE_HINT =
+            java.util.regex.Pattern.compile("찜.{0,4}(해제|취소|빼)|(해제|취소|빼).{0,4}찜");
 
     // "이 영화 찜해줘"처럼 직전에 추천받은 영화를 찜 목록에 담아달라는 요청은 판단이 필요한 게 아니라 그냥
     // 실행하면 되는 결정적인 동작이라, Gemini에게 물어보지 않고 정규식으로 바로 처리합니다(API 호출도
@@ -800,20 +825,58 @@ public class ChatService {
     private ChatResponseDto handleWishlistRequest(
             User user, ChatConversation conversation, String userMessage, List<ChatMessage> fullHistory
     ) {
-        List<MovieSummaryDto> movies = lastRecommendedMovies(fullHistory);
-        if (movies.isEmpty()) {
+        List<MovieSummaryDto> candidates = lastRecommendedMovies(fullHistory);
+        if (candidates.isEmpty()) {
             String reply = "먼저 추천받은 영화가 있어야 찜할 수 있어요! 어떤 영화를 찾아드릴까요?";
             return persistTurn(user, conversation, userMessage, reply, List.of());
         }
+        // 추천 목록이 여러 편일 때 "레이디 두아 찜해줘"처럼 메시지에 특정 제목이 언급돼 있으면 그 한 편만
+        // 찜하고, "이 영화 찜해줘"처럼 특정 제목 언급이 없으면 기존대로 추천 목록 전체를 찜합니다.
+        List<MovieSummaryDto> movies = findMentionedMovie(userMessage, candidates)
+                .map(List::of)
+                .orElse(candidates);
         for (MovieSummaryDto movie : movies) {
             wishlistService.add(user.getId(), new WishlistRequest(movie.id(), movie.title(), movie.posterUrl()));
         }
         String titles = movies.stream().map(MovieSummaryDto::title).collect(Collectors.joining(", "));
-        String reply = "%s %s 찜했습니다."
+        String reply = "영화 %s %s 찜했습니다."
                 .formatted(titles, movies.size() > 1 ? "등 %d편을".formatted(movies.size()) : "을(를)");
         // 찜하기 확인 메시지에는 영화 카드 목록을 다시 붙이지 않습니다 - movies를 그대로 넘기면
         // ChatMovieRecommendation이 방금 봤던 추천 카드 그리드를 통째로 다시 그려서, 화면상 방금 추천
         // 답변과 거의 구분이 안 되는 문제가 있었습니다(사용자가 "안 고쳐졌다"고 재차 신고한 원인).
+        return persistTurn(user, conversation, userMessage, reply, List.of());
+    }
+
+    // "찜 해제"/"찜 취소"/"찜 빼줘"처럼 이미 찜한 영화를 목록에서 지워달라는 요청입니다. 방금 추천받은
+    // 영화가 아니라 예전에 찜해둔 영화를 가리키는 경우가 흔해서, 추천 목록이 아니라 실제 사용자 찜 목록을
+    // 기준으로 제목을 대조합니다. "여름 너머, 취준생 찜 해제해줘"처럼 쉼표로 여러 편을 한 번에 요청하면
+    // 언급된 영화를 전부 지웁니다.
+    private ChatResponseDto handleWishlistRemoveRequest(
+            User user, ChatConversation conversation, String userMessage
+    ) {
+        List<WishlistDto> wishlist = wishlistService.list(user.getId());
+        if (wishlist.isEmpty()) {
+            String reply = "찜한 영화가 없어요.";
+            return persistTurn(user, conversation, userMessage, reply, List.of());
+        }
+
+        String normalizedMessage = userMessage.replaceAll("\\s+", "");
+        List<WishlistDto> matched = wishlist.stream()
+                .filter(item -> item.movieTitle() != null && normalizedMessage.contains(item.movieTitle().replaceAll("\\s+", "")))
+                .toList();
+
+        if (matched.isEmpty()) {
+            String reply = "어떤 영화를 찜 해제할지 제목으로 말씀해주시겠어요? (현재 찜한 영화: %s)"
+                    .formatted(wishlist.stream().map(WishlistDto::movieTitle).collect(Collectors.joining(", ")));
+            return persistTurn(user, conversation, userMessage, reply, List.of());
+        }
+
+        for (WishlistDto item : matched) {
+            wishlistService.remove(user.getId(), item.movieId());
+        }
+        String titles = matched.stream().map(WishlistDto::movieTitle).collect(Collectors.joining(", "));
+        String reply = "영화 %s %s 찜 해제했습니다."
+                .formatted(titles, matched.size() > 1 ? "등 %d편을".formatted(matched.size()) : "을(를)");
         return persistTurn(user, conversation, userMessage, reply, List.of());
     }
 
