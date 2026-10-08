@@ -9,7 +9,7 @@ function ChatBubble({ from, isError, children }) {
 
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
-      <div className={`max-w-xl rounded-xl px-4 py-3 text-sm ${bubbleStyle}`}>{children}</div>
+      <div className={`max-w-xl whitespace-pre-wrap rounded-xl px-4 py-3 text-sm ${bubbleStyle}`}>{children}</div>
     </div>
   )
 }

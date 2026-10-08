@@ -1,9 +1,12 @@
 import { Link } from 'react-router-dom'
+import { genreLabel as translateGenre } from '../../MovieList/components/filterOptions'
 import PosterPlaceholder from '../../../components/common/PosterPlaceholder'
 
 // 포스터를 누르면 영화 상세보기로, "예매하기" 버튼을 누르면 좌석 선택 화면으로 - 목적지가 서로 달라서
 // 카드 전체를 하나의 링크로 감싸지 않고 두 개의 링크로 나눴습니다.
 function NowShowingCard({ movie }) {
+  const genreLabel = movie.genres?.map(translateGenre).join(', ')
+
   return (
     <div className="group overflow-hidden rounded-lg bg-slate-900 transition-transform hover:-translate-y-1">
       <Link to={`/movies/${movie.id}`} className="block">
@@ -36,7 +39,7 @@ function NowShowingCard({ movie }) {
         </Link>
         <p className="text-xs text-gray-400">
           {movie.year}
-          {movie.ageRating ? ` · ${movie.ageRating}` : ''}
+          {genreLabel ? ` · ${genreLabel}` : ''}
         </p>
         <Link
           to={`/booking/${movie.id}`}

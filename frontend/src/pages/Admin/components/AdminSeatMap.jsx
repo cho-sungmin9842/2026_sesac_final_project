@@ -41,7 +41,9 @@ function AdminSeatMap({ seats }) {
                   key={seat.id}
                   aria-label={isAccessible ? `${label} (장애인석)` : label}
                   title={label}
-                  className={`h-5 w-5 rounded-sm ${seatClassName(isReserved, isAccessible)} ${isBlockStart ? 'ml-4' : ''}`}
+                  // select-none: 읽기 전용 현황판이라 클릭해도 아무 동작이 없는데, 빈 inline 요소라
+                  // 클릭할 때 브라우저가 텍스트 선택 커서(흰색 "|")를 보여주는 문제가 있었습니다.
+                  className={`h-5 w-5 select-none rounded-sm ${seatClassName(isReserved, isAccessible)} ${isBlockStart ? 'ml-4' : ''}`}
                 />
               )
             })}

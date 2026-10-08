@@ -161,8 +161,17 @@ public class BookingService {
                 screening != null ? screening.getStartTime().toString() : "-",
                 seatLabels,
                 booking.getTotalPrice(),
-                booking.getCreatedAt()
+                booking.getCreatedAt(),
+                ticketCounts(booking)
         );
+    }
+
+    // 마이페이지 예매 내역에 "성인 2 · 청소년 1"처럼 인원 구분별 인원 수를 보여주기 위해, 예매에 담긴
+    // 좌석들을 ticketCategory별로 세어 돌려줍니다(0명인 구분은 결과에서 아예 빼서 화면에서 걸러낼
+    // 필요 없게 합니다).
+    private Map<String, Integer> ticketCounts(Booking booking) {
+        return booking.getSeats().stream()
+                .collect(Collectors.groupingBy(BookingSeat::getTicketCategory, Collectors.summingInt(seat -> 1)));
     }
 
     // 마이페이지 좌석 배치도 다이얼로그 - 내 예매에 포함된 좌석 하나를 아직 비어있는 다른 좌석으로
@@ -313,7 +322,8 @@ public class BookingService {
                 screening.getStartTime().toString(),
                 seatLabels,
                 booking.getTotalPrice(),
-                booking.getCreatedAt()
+                booking.getCreatedAt(),
+                ticketCounts(booking)
         );
     }
 }

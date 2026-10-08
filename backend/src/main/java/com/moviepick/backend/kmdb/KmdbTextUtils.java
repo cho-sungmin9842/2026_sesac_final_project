@@ -15,11 +15,15 @@ public final class KmdbTextUtils {
 
     private static final String HIGHLIGHT_MARKER_PATTERN = "!HS|!HE";
     // 한글 음절/한글 자모/한자/영문/숫자만 "제목의 실제 글자"로 보고, 제목의 맨 앞/맨 뒤에서 이 범위에
-    // 들지 않는 문자(공백 포함)가 이어지면 지웁니다. 한자(예: "遺")나 낱자모만으로 된 제목(예: "ㅈ")은
-    // 특수문자가 아니라 실제 제목 글자라 지우면 안 되므로 허용 범위(\\u4E00-\\u9FFF 한자, \\u3131-\\u318E
-    // 한글 자모)에 포함해둡니다.
+    // 들지 않는 문자가 이어지면 지웁니다. 한자(예: "遺")나 낱자모만으로 된 제목(예: "ㅈ")은 특수문자가
+    // 아니라 실제 제목 글자라 지우면 안 되므로 허용 범위(\\u4E00-\\u9FFF 한자, \\u3131-\\u318E 한글
+    // 자모)에 포함해둡니다.
     private static final String TITLE_CONTENT_CHAR_CLASS = "0-9A-Za-z가-힣\\u3131-\\u318E\\u4E00-\\u9FFF";
-    private static final String EDGE_NON_CONTENT_PATTERN = "[^" + TITLE_CONTENT_CHAR_CLASS + "]";
+    // "암살자(들)"처럼 쌍으로 쓰이는 괄호류는 제목의 맨 앞/뒤에 있어도 실제 표기이므로 지우면 안 됩니다
+    // (2026-10-08, 이걸 구분하지 않고 전부 지워서 "암살자(들"로 닫는 괄호가 잘려나가는 버그가 있었습니다).
+    private static final String BRACKET_CHAR_CLASS = "()\\[\\]{}<>「」『』《》〈〉";
+    // 맨 앞/뒤에서 지워도 되는 문자 = "실제 제목 글자"도 아니고 "괄호류"도 아닌 문자(#, -, +, = 등)만입니다.
+    private static final String EDGE_STRIPPABLE_PATTERN = "[^" + TITLE_CONTENT_CHAR_CLASS + BRACKET_CHAR_CLASS + "]";
 
     private KmdbTextUtils() {
     }
@@ -33,18 +37,19 @@ public final class KmdbTextUtils {
     }
 
     // 영화 제목(title) 전용 - "#살아있다"처럼 제목의 맨 앞/맨 뒤에 붙은 특수문자(#, -, +, = 등)만 지우고,
-    // "타짜3-짝귀와의 만남"처럼 제목 중간에 있는 특수문자는 실제 표기이므로 그대로 둡니다. "- +"처럼
-    // 제목 전체가 맨 앞/맨 뒤 제거 대상 문자뿐이라 다 지우면 빈 제목이 되는 경우는 null을 돌려주고(한자
-    // 제목은 특수문자가 아니라 TITLE_CONTENT_CHAR_CLASS에서 이미 허용해두었으니 여기 해당하지 않습니다),
-    // 그런 영화는 blank/null 제목 필터링 로직에서 목록에서 자연스럽게 빠집니다.
+    // "암살자(들)"처럼 괄호류가 맨 앞/뒤에 있거나 "타짜3-짝귀와의 만남"처럼 제목 중간에 특수문자가 있는
+    // 경우는 실제 표기이므로 그대로 둡니다(맨 앞/뒤에서 한 글자씩만 보면서 실제 제목 글자나 괄호류를
+    // 만나면 그 자리에서 멈추므로, 중간에 있는 문자는 애초에 이 정규식이 건드리지 않습니다). "- +"처럼
+    // 제목 전체가 지움 대상 문자뿐이라 다 지우면 빈 제목이 되는 경우는 null을 돌려주고, 그런 영화는
+    // blank/null 제목 필터링 로직에서 목록에서 자연스럽게 빠집니다.
     public static String cleanTitle(String value) {
         String cleaned = clean(value);
         if (cleaned == null) {
             return null;
         }
         String trimmed = cleaned
-                .replaceAll("^" + EDGE_NON_CONTENT_PATTERN + "+", "")
-                .replaceAll(EDGE_NON_CONTENT_PATTERN + "+$", "");
+                .replaceAll("^" + EDGE_STRIPPABLE_PATTERN + "+", "")
+                .replaceAll(EDGE_STRIPPABLE_PATTERN + "+$", "");
         return trimmed.isEmpty() ? null : trimmed;
     }
 

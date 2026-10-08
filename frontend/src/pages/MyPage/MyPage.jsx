@@ -9,6 +9,7 @@ import { deleteReview, getMyReviews, updateReview } from '../../api/reviewApi'
 import { getPreferredGenres, updatePreferredGenres } from '../../api/userApi'
 import { getMovieDetail } from '../../api/movieApi'
 import { genreLabel, genres as ALL_GENRES } from '../MovieList/components/filterOptions'
+import { AGE_CATEGORIES } from '../Booking/bookingData'
 import MovieCard from '../../components/common/MovieCard'
 import WriteReviewDialog from '../MovieDetail/components/WriteReviewDialog'
 import AiTasteReport from './components/AiTasteReport'
@@ -32,7 +33,34 @@ function formatJoinedAt(createdAt) {
 // 없게 합니다(이미 끝난 상영의 좌석을 바꾸는 건 의미가 없으니까요).
 function isPastShowing(booking) {
   if (!booking.showDate || !booking.showtime) return false
-  return new Date(`${booking.showDate}T${booking.showtime}`) < new Date()
+  return showingDateTime(booking) < new Date()
+}
+
+function showingDateTime(booking) {
+  if (!booking.showDate || !booking.showtime) return new Date(0)
+  return new Date(`${booking.showDate}T${booking.showtime}`)
+}
+
+// 상영 시작 시각으로 조조/일반/심야를 가립니다 - 백엔드 TicketPricing.timePeriodFor()와 경계값을
+// 맞춰뒀습니다(10시/21시 "경계"는 각각 일반/심야 쪽에 포함). 요금표도 이 구분을 기준으로 달라집니다.
+function timePeriodLabel(showtime) {
+  if (!showtime) return ''
+  const hour = Number(showtime.slice(0, showtime.indexOf(':')))
+  if (hour < 10) return '조조'
+  if (hour < 21) return '일반'
+  return '심야'
+}
+
+// 예매 내역의 인원 구분별 인원 수("성인 2명 · 청소년 1명")를 표시 순서(성인→청소년→어린이→우대)대로
+// 만듭니다. 0명인 구분은 ticketCounts에 아예 없으니 자연스럽게 빠집니다.
+function formatTicketCounts(ticketCounts) {
+  if (!ticketCounts) return ''
+  return AGE_CATEGORIES.map(({ key, label }) => {
+    const count = ticketCounts[key]
+    return count > 0 ? `${label} ${count}명` : null
+  })
+    .filter(Boolean)
+    .join(' · ')
 }
 
 function formatShortDate(isoString) {
@@ -142,12 +170,33 @@ function SavedGenresDialog({ onClose }) {
   )
 }
 
-function MyBookingList({ bookings, isLoading, onSeatClick }) {
+const BOOKING_FILTERS = ['상영 예정', '상영 종료']
+
+function BookingFilterTabs({ active, onChange }) {
+  return (
+    <div className="mb-4 flex gap-2">
+      {BOOKING_FILTERS.map((filter) => (
+        <button
+          key={filter}
+          type="button"
+          onClick={() => onChange(filter)}
+          className={`rounded-full px-3 py-1.5 text-xs font-semibold ${
+            active === filter ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-gray-300 hover:bg-slate-700'
+          }`}
+        >
+          {filter}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+function MyBookingList({ bookings, isLoading, onSeatClick, emptyMessage }) {
   if (isLoading) {
     return <p className="text-sm text-gray-500">불러오는 중...</p>
   }
   if (bookings.length === 0) {
-    return <p className="text-sm text-gray-500">예매 내역이 아직 없습니다.</p>
+    return <p className="text-sm text-gray-500">{emptyMessage}</p>
   }
   return (
     <div className="space-y-3">
@@ -170,8 +219,16 @@ function MyBookingList({ bookings, isLoading, onSeatClick }) {
             </div>
             <p className="mt-1 text-xs text-gray-400">
               {booking.theaterName} · {booking.showDate} {booking.showtime}
+              {timePeriodLabel(booking.showtime) && (
+                <span className="ml-1 rounded bg-slate-800 px-1.5 py-0.5 text-[11px] font-semibold text-indigo-300">
+                  {timePeriodLabel(booking.showtime)}
+                </span>
+              )}
               {isPast && <span className="ml-2 text-gray-600">(상영 종료)</span>}
             </p>
+            {formatTicketCounts(booking.ticketCounts) && (
+              <p className="mt-1 text-xs text-gray-400">{formatTicketCounts(booking.ticketCounts)}</p>
+            )}
             <div className="mt-2 flex items-center justify-between text-sm">
               <span className="flex flex-wrap items-center gap-x-1 text-gray-300">
                 좌석{' '}
@@ -243,6 +300,7 @@ function MyPage() {
   const { user } = useAuth()
   const { wishlistedIds, refresh: refreshWishlistedIds } = useWishlist()
   const [activeTab, setActiveTab] = useState(TABS[0])
+  const [bookingFilter, setBookingFilter] = useState(BOOKING_FILTERS[0])
   const [bookings, setBookings] = useState([])
   const [bookingsLoading, setBookingsLoading] = useState(true)
   const [wishlist, setWishlist] = useState([])
@@ -360,6 +418,18 @@ function MyPage() {
   // 찜 목록 개수/카드 목록은 WishlistContext(실시간 찜 설정/해제 상태)를 기준으로 다시 걸러냅니다.
   const visibleWishlistMovies = wishlistMovies.filter((movie) => wishlistedIds.has(movie.id))
 
+  // 예매 내역을 "상영 예정"/"상영 종료"로 나눠서 보여주고, 상영 날짜·시간 순으로 정렬합니다 - 상영
+  // 예정은 가장 임박한 회차가 먼저 보이도록 오름차순, 상영 종료는 가장 최근에 끝난 회차가 먼저 보이도록
+  // 내림차순입니다.
+  const filteredBookings = bookings
+    .filter((booking) => (bookingFilter === '상영 종료' ? isPastShowing(booking) : !isPastShowing(booking)))
+    .sort((a, b) => {
+      const diff = showingDateTime(a) - showingDateTime(b)
+      return bookingFilter === '상영 종료' ? -diff : diff
+    })
+  const bookingEmptyMessage =
+    bookingFilter === '상영 종료' ? '상영 종료된 예매 내역이 없습니다.' : '상영 예정인 예매 내역이 없습니다.'
+
   const profile = {
     nickname: user.nickname,
     joinedAt: formatJoinedAt(user.createdAt),
@@ -400,7 +470,15 @@ function MyPage() {
 
       <div className="mt-6">
         {activeTab === '예매 내역' && (
-          <MyBookingList bookings={bookings} isLoading={bookingsLoading} onSeatClick={setSeatMapBooking} />
+          <>
+            <BookingFilterTabs active={bookingFilter} onChange={setBookingFilter} />
+            <MyBookingList
+              bookings={filteredBookings}
+              isLoading={bookingsLoading}
+              onSeatClick={setSeatMapBooking}
+              emptyMessage={bookingEmptyMessage}
+            />
+          </>
         )}
         {activeTab === '찜한 영화' && (
           <MoviePosterGrid

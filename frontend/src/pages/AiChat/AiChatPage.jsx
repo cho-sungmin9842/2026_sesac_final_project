@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../../auth/AuthContext'
+import { useWishlist } from '../../wishlist/WishlistContext'
 import { deleteConversation, getConversationMessages, getConversations, sendChatMessage } from '../../api/chatApi'
 import ChatBubble from './components/ChatBubble'
 import ChatMovieRecommendation from './components/ChatMovieRecommendation'
@@ -9,7 +10,6 @@ import ChatSeatStatus from './components/ChatSeatStatus'
 const QUICK_REPLIES = [
   '같은 장르의 영화들을 추천해줘',
   '이번 주말에 볼만한 영화 추천해줘',
-  '짧고 가볍게 볼 영화 추천해줘',
   '이 영화 찜해줘',
 ]
 
@@ -52,6 +52,7 @@ function TypingIndicator() {
 
 function AiChatPage() {
   const { user } = useAuth()
+  const { refresh: refreshWishlistedIds } = useWishlist()
   const [conversations, setConversations] = useState([])
   const [isLoadingConversations, setIsLoadingConversations] = useState(true)
   // null이면 아직 메시지를 한 번도 보내지 않은 "새 대화" 상태입니다(서버에 대화방이 없고, 첫 메시지를
@@ -63,12 +64,19 @@ function AiChatPage() {
   const [isSending, setIsSending] = useState(false)
   const nextId = useRef(1)
   const bottomRef = useRef(null)
+  const inputRef = useRef(null)
   // sendMessage가 새로 만들어진 conversationId를 activeConversationId에 반영할 때, 그 대화의 메시지는
   // 이미 화면에 다 있으므로 바로 아래 effect가 서버에서 또 불러오지 않도록 막는 플래그입니다.
   const skipNextFetchRef = useRef(false)
 
   // 접속 시점의 실제 날짜를 그때그때 반영해야 하니, 고정 배열이 아니라 렌더링마다 새로 만듭니다.
-  const quickReplies = [...QUICK_REPLIES, `오늘(${formatToday()} 기준) 상영중인 영화를 찾아줘`]
+  // 화면에는 짧게 "오늘 상영중인 영화를 찾아줘"라고 보여주되, 실제로 서버에 보내는 메시지는 그대로
+  // "오늘(YYYY.MM.DD 기준) 상영중인 영화를 찾아줘"입니다 - 버튼 문구만 간결하게 바꾸고 동작(채팅 내용,
+  // 백엔드 처리)은 기존과 똑같이 유지하기 위해 화면 표시(label)와 실제 전송 내용(message)을 분리했습니다.
+  const quickReplies = [
+    { label: '오늘 상영중인 영화를 찾아줘', message: `오늘(${formatToday()} 기준) 상영중인 영화를 찾아줘` },
+    ...QUICK_REPLIES.map((text) => ({ label: text, message: text })),
+  ]
 
   // 대화방 목록을 불러와서, 지난 대화가 있으면 가장 최근 대화를 이어서 보여주고(원래 하던 대로 "이어서
   // 계속하기"), 하나도 없는 완전히 새 사용자일 때만 인사말을 보여줍니다.
@@ -113,7 +121,9 @@ function AiChatPage() {
     getConversationMessages(user.id, activeConversationId)
       .then((saved) => {
         if (cancelled) return
-        const loaded = saved.length === 0 ? [GREETING] : saved.map((item) => fromSavedMessage(item, nextId.current++))
+        // 사이드바에서 지난 대화를 열었을 때도 "새 대화 시작"과 똑같이 맨 위에 인사말이 보이도록,
+        // 저장된 메시지 앞에 항상 인사말을 붙입니다(인사말 자체는 DB에 저장되지 않는 화면 전용 메시지).
+        const loaded = [GREETING, ...saved.map((item) => fromSavedMessage(item, nextId.current++))]
         setMessages(loaded)
       })
       .catch(() => {
@@ -131,6 +141,15 @@ function AiChatPage() {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
+
+  // Shift+Enter로 줄바꿈한 내용이 입력창 안에서 가려지지 않도록, 입력 내용에 맞춰 높이를 늘립니다
+  // (일정 높이 이상이 되면 CSS max-height로 막아두고 그 다음부터는 스크롤됩니다).
+  useEffect(() => {
+    const textarea = inputRef.current
+    if (!textarea) return
+    textarea.style.height = 'auto'
+    textarea.style.height = `${textarea.scrollHeight}px`
+  }, [input])
 
   const sendMessage = async (text) => {
     const trimmed = text.trim()
@@ -165,6 +184,11 @@ function AiChatPage() {
       getConversations(user.id)
         .then(setConversations)
         .catch(() => {})
+      // "이 영화 찜해줘"/"찜 해제해줘"처럼 채팅으로 찜 목록이 바뀌었을 수 있는데, WishlistContext는
+      // 로그인 시 한 번만 불러온 뒤 toggle()을 거치지 않은 변경은 알 방법이 없어서 북마크 표시가 낡은
+      // 상태로 남아있었습니다(예: 찜 목록 조회 응답의 카드들이 전부 찜 안 된 것처럼 보임). 매 응답마다
+      // 다시 불러와 맞춥니다.
+      refreshWishlistedIds().catch(() => {})
     } catch (error) {
       setMessages((prev) =>
         prev.map((message) =>
@@ -265,27 +289,35 @@ function AiChatPage() {
         </div>
 
         <div className="mb-3 flex flex-wrap gap-2">
-          {quickReplies.map((reply) => (
+          {quickReplies.map(({ label, message }) => (
             <button
-              key={reply}
+              key={message}
               type="button"
               disabled={isSending}
-              onClick={() => sendMessage(reply)}
+              onClick={() => sendMessage(message)}
               className="rounded-full border border-gray-700 px-3 py-1.5 text-xs text-gray-300 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
             >
-              {reply}
+              {label}
             </button>
           ))}
         </div>
 
         <form onSubmit={handleSubmit} className="flex gap-2">
-          <input
+          <textarea
+            ref={inputRef}
             value={input}
             onChange={(event) => setInput(event.target.value)}
-            type="text"
+            onKeyDown={(event) => {
+              // Enter만 누르면 전송하고, Shift+Enter는 줄바꿈만 하고 전송하지 않습니다(이어서 입력 가능).
+              if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault()
+                sendMessage(input)
+              }
+            }}
+            rows={1}
             disabled={isSending}
-            placeholder="메시지를 입력하세요..."
-            className="flex-1 rounded-lg bg-slate-900 px-4 py-3 text-sm text-gray-100 placeholder:text-gray-500 focus:outline-none disabled:opacity-60"
+            placeholder="메시지를 입력하세요... (Shift+Enter로 줄바꿈)"
+            className="max-h-40 flex-1 resize-none overflow-y-auto rounded-lg bg-slate-900 px-4 py-3 text-sm text-gray-100 placeholder:text-gray-500 focus:outline-none disabled:opacity-60"
           />
           <button
             type="submit"
