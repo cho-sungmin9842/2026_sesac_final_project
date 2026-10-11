@@ -1,44 +1,6 @@
-// 장르: KMDB의 genre 검색 파라미터에 그대로 전달합니다(부분일치로 동작 확인됨).
-// KMDB가 실제로 쓰는 장르 태그 전체 목록입니다.
-export const genres = [
-  '전체',
-  'SF',
-  '가족',
-  '공포',
-  '교육',
-  '기업ㆍ기관ㆍ단체',
-  '동성애',
-  '드라마',
-  '로드무비',
-  '멜로/로맨스',
-  '무협',
-  '문화',
-  '뮤직',
-  '미스터리',
-  '범죄',
-  '사회',
-  '사회물(경향)',
-  '스릴러',
-  '스포츠',
-  '시대극/사극',
-  '실험',
-  '아동',
-  '액션',
-  '어드벤처',
-  '에로',
-  '역사',
-  '옴니버스',
-  '인권',
-  '인물',
-  '자연ㆍ환경',
-  '재난',
-  '전쟁',
-  '지역',
-  '청춘영화',
-  '코메디',
-  '판타지',
-  '하이틴(고교)',
-]
+// 장르 목록은 더 이상 여기 하드코딩하지 않고, 백엔드 MovieGenres.ALL을 유일한 출처로 삼아
+// api/movieApi.js의 getGenres()로 받아옵니다(ChatService의 Gemini 프롬프트와도 같은 출처라
+// 한쪽만 바뀌어 어긋나는 일이 없습니다). "전체"는 화면 전용 선택지라 쓰는 쪽에서 덧붙입니다.
 
 export function genreLabel(genre) {
   return genre
@@ -50,12 +12,16 @@ const YEAR_RANGE_START = 2027
 const YEAR_RANGE_END = 1885
 const YEARS_WITH_NO_DATA = new Set([1886, 1888, 1890, 1891, 1892])
 
+// "정보 없음"은 개봉일자도 제작연도도 아예 없어 연도 자체를 알 수 없는 극소수 영화만 모아 보여줍니다
+// (러닝타임의 "정보 없음"과 같은 개념 - movieApi.js가 "unknown" 코드로 바꿔 보냅니다).
 export const years = [
   '전체',
   ...Array.from({ length: YEAR_RANGE_START - YEAR_RANGE_END + 1 }, (_, i) => YEAR_RANGE_START - i)
     .filter((year) => !YEARS_WITH_NO_DATA.has(year))
     .map(String),
+  '정보 없음',
 ]
 // 러닝타임: KMDB 검색 API에 관련 파라미터가 없어, 백엔드가 응답을 받은 뒤 직접 걸러서 내려줍니다
-// (totalCount/페이지네이션에도 반영됨 - movieApi.js가 이 라벨을 under120/over120 코드로 바꿔 보냅니다).
-export const runtimeFilters = ['전체', '2시간 미만', '2시간 이상']
+// (totalCount/페이지네이션에도 반영됨 - movieApi.js가 이 라벨을 under120/over120/unknown 코드로 바꿔
+// 보냅니다). "정보 없음"은 KMDB에 러닝타임 자체가 없는 영화만 모아 보여줍니다.
+export const runtimeFilters = ['전체', '2시간 미만', '2시간 이상', '정보 없음']

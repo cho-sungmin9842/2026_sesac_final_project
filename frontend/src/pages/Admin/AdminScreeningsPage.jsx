@@ -182,7 +182,8 @@ function AdminScreeningsPage() {
           <p className="text-sm text-red-400">예매 현황을 불러오지 못했습니다. 다시 시도해주세요.</p>
         )}
         {occupancyStatus === 'ready' && occupancy.length > 0 && (
-          <table className="w-full text-left text-sm">
+          <div className="overflow-x-auto">
+          <table className="w-full min-w-[480px] text-left text-sm">
             <thead>
               <tr className="border-b border-white/10 text-gray-400">
                 <th className="pb-3 font-medium">회차</th>
@@ -216,6 +217,7 @@ function AdminScreeningsPage() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
 

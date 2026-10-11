@@ -68,9 +68,9 @@ function TossPaymentWidget({ amount, onComplete }) {
   }
 
   return (
-    <div className="rounded-lg border border-gray-200 p-4">
+    <div className="rounded-lg border border-white/10 bg-white p-4">
       {status === 'error' && (
-        <p className="text-sm text-rose-500">결제 SDK를 불러오지 못했습니다. 새로고침 후 다시 시도해주세요.</p>
+        <p className="text-sm text-rose-600">결제 SDK를 불러오지 못했습니다. 새로고침 후 다시 시도해주세요.</p>
       )}
       <div id="toss-payment-method" />
       <div id="toss-agreement" />

@@ -4,6 +4,8 @@ import com.moviepick.backend.booking.dto.BookingDto;
 import com.moviepick.backend.booking.dto.BookingRequest;
 import com.moviepick.backend.booking.dto.SeatChangeRequest;
 import jakarta.validation.Valid;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -11,6 +13,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
@@ -48,5 +51,14 @@ public class BookingController {
             @Valid @RequestBody SeatChangeRequest request
     ) {
         return bookingService.changeSeat(userId, bookingId, request);
+    }
+
+    /**
+     * 마이페이지 "예매 내역" 탭의 "예매 취소" - 좌석도 함께 다시 예매 가능 상태로 돌아갑니다.
+     */
+    @DeleteMapping("/{bookingId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void cancel(@RequestHeader("X-User-Id") Long userId, @PathVariable Long bookingId) {
+        bookingService.cancel(userId, bookingId);
     }
 }

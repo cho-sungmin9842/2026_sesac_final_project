@@ -44,10 +44,23 @@ function MovieListPage() {
     })
   }
 
+  // 홈 화면 "전체보기"처럼 스크롤이 내려간 상태에서 이 페이지로 들어올 때, 이전 스크롤 위치가 그대로
+  // 남아있어 화면 중간부터 보이는 문제가 있어 항상 맨 위에서 시작하도록 맞춥니다. searchParams가 바뀌면
+  // (예: 다른 장르로 "전체보기"를 다시 눌렀을 때) 다시 떠도 맨 위로 이동합니다.
+  useEffect(() => {
+    window.scrollTo(0, 0)
+  }, [searchParams.toString()])
+
   // 검색어/검색대상/장르/연도/러닝타임/정렬이 바뀌면 1페이지부터 다시 봅니다.
   useEffect(() => {
     setPage(1)
   }, [query, field, filters.genres, filters.year, filters.runtime, sort])
+
+  // 장르/개봉연도/러닝타임 중 하나를 고르면, 스크롤을 내려서 아래쪽 카드를 보던 중이었어도 바뀐 결과를
+  // 처음부터 볼 수 있도록 맨 위로 이동합니다.
+  useEffect(() => {
+    window.scrollTo(0, 0)
+  }, [filters.genres, filters.year, filters.runtime])
 
   useEffect(() => {
     let cancelled = false
@@ -85,7 +98,7 @@ function MovieListPage() {
   const heading = query ? `"${query}" 검색 결과` : '전체 영화'
 
   return (
-    <div className="mx-auto flex max-w-7xl gap-8 px-6 py-6">
+    <div className="mx-auto flex max-w-7xl flex-col gap-6 px-4 py-6 sm:px-6 md:flex-row md:gap-8">
       <FilterSidebar filters={filters} onChange={handleFilterChange} onToggleGenre={handleToggleGenre} />
 
       <section className="flex-1">

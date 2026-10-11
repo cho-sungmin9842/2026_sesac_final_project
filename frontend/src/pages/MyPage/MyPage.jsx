@@ -1,24 +1,24 @@
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../auth/AuthContext'
 import { useWishlist } from '../../wishlist/WishlistContext'
 import { getWishlist } from '../../api/wishlistApi'
 import { getWatched } from '../../api/watchedApi'
-import { getMyBookings } from '../../api/bookingApi'
+import { cancelBooking, getMyBookings } from '../../api/bookingApi'
 import { deleteReview, getMyReviews, updateReview } from '../../api/reviewApi'
-import { getPreferredGenres, updatePreferredGenres } from '../../api/userApi'
-import { getMovieDetail } from '../../api/movieApi'
-import { genreLabel, genres as ALL_GENRES } from '../MovieList/components/filterOptions'
+import { changePassword, deleteAccount, getPreferredGenres, updatePreferredGenres } from '../../api/userApi'
+import { getGenres, getMovieDetail } from '../../api/movieApi'
+import { genreLabel } from '../MovieList/components/filterOptions'
 import { AGE_CATEGORIES } from '../Booking/bookingData'
 import MovieCard from '../../components/common/MovieCard'
 import WriteReviewDialog from '../MovieDetail/components/WriteReviewDialog'
 import AiTasteReport from './components/AiTasteReport'
 import ProfileHeader from './components/ProfileHeader'
 import BookingSeatMapDialog from './components/BookingSeatMapDialog'
+import ChangePasswordDialog from './components/ChangePasswordDialog'
+import DeleteAccountDialog from './components/DeleteAccountDialog'
 
 const TABS = ['예매 내역', '찜한 영화', '시청완료', '내가 쓴 리뷰']
-// "전체"는 필터 전용 옵션이라 개인 취향 선택지에서는 뺍니다.
-const SELECTABLE_GENRES = ALL_GENRES.filter((genre) => genre !== '전체')
 
 function formatJoinedAt(createdAt) {
   if (!createdAt) return '-'
@@ -30,10 +30,21 @@ function formatJoinedAt(createdAt) {
 }
 
 // 상영이 이미 끝난 예매는 좌석 정보는 그대로 보여주되, 눌러서 좌석 배치도/변경 다이얼로그를 열 수는
-// 없게 합니다(이미 끝난 상영의 좌석을 바꾸는 건 의미가 없으니까요).
+// 없게 합니다(이미 끝난 상영의 좌석을 바꾸는 건 의미가 없으니까요). "상영 예정/상영 종료" 탭 구분과
+// 예매 통계도 이 기준(실제로 상영이 시작됐는지)을 그대로 씁니다.
 function isPastShowing(booking) {
   if (!booking.showDate || !booking.showtime) return false
   return showingDateTime(booking) < new Date()
+}
+
+// 취소/좌석변경 가능 여부 전용 - 백엔드(BookingService.BOOKING_CUTOFF_MINUTES)와 같은 기준으로,
+// 아직 상영 전이라도 시작 30분 이내면 버튼을 눌러도 서버가 거절하므로 미리 숨겨서 혼란을 줄입니다.
+// isPastShowing(실제 상영 시작 여부)과는 다른 기준이라 따로 둡니다.
+const BOOKING_CANCEL_CUTOFF_MINUTES = 30
+
+function isPastCancelCutoff(booking) {
+  if (!booking.showDate || !booking.showtime) return false
+  return showingDateTime(booking) < new Date(Date.now() + BOOKING_CANCEL_CUTOFF_MINUTES * 60 * 1000)
 }
 
 function showingDateTime(booking) {
@@ -117,7 +128,7 @@ function MoviePosterGrid({ movies, isLoading, emptyMessage }) {
   )
 }
 
-function PreferredGenresCard({ selected, onToggle, onSave, saving }) {
+function PreferredGenresCard({ genres, selected, onToggle, onSave, saving }) {
   return (
     <div className="mt-4 rounded-lg bg-slate-900 p-4">
       <div className="flex items-center justify-between">
@@ -133,7 +144,7 @@ function PreferredGenresCard({ selected, onToggle, onSave, saving }) {
       </div>
       <p className="mt-1 text-xs text-gray-500">좋아하는 장르를 선택해두면 AI 추천이 더 정확해져요.</p>
       <div className="mt-3 flex flex-wrap gap-2">
-        {SELECTABLE_GENRES.map((genre) => {
+        {genres.map((genre) => {
           const isSelected = selected.includes(genre)
           return (
             <button
@@ -191,7 +202,7 @@ function BookingFilterTabs({ active, onChange }) {
   )
 }
 
-function MyBookingList({ bookings, isLoading, onSeatClick, emptyMessage }) {
+function MyBookingList({ bookings, isLoading, onSeatClick, onCancel, emptyMessage }) {
   if (isLoading) {
     return <p className="text-sm text-gray-500">불러오는 중...</p>
   }
@@ -202,6 +213,9 @@ function MyBookingList({ bookings, isLoading, onSeatClick, emptyMessage }) {
     <div className="space-y-3">
       {bookings.map((booking) => {
         const isPast = isPastShowing(booking)
+        // 상영이 아직 시작 전이라도 30분 이내로 임박했으면 취소/좌석변경 버튼을 숨깁니다(서버도 같은
+        // 기준으로 거절하므로, 눌러보고 나서야 에러를 보게 하지 않습니다).
+        const canModify = !isPastCancelCutoff(booking)
         return (
           <div key={booking.id} className="rounded-lg bg-slate-900 p-4">
             <div className="flex items-center justify-between">
@@ -225,6 +239,9 @@ function MyBookingList({ bookings, isLoading, onSeatClick, emptyMessage }) {
                 </span>
               )}
               {isPast && <span className="ml-2 text-gray-600">(상영 종료)</span>}
+              {!isPast && !canModify && (
+                <span className="ml-2 text-amber-500">(상영 임박 · 취소/좌석변경 불가)</span>
+              )}
             </p>
             {formatTicketCounts(booking.ticketCounts) && (
               <p className="mt-1 text-xs text-gray-400">{formatTicketCounts(booking.ticketCounts)}</p>
@@ -234,9 +251,7 @@ function MyBookingList({ bookings, isLoading, onSeatClick, emptyMessage }) {
                 좌석{' '}
                 {booking.seats.map((seat, index) => (
                   <span key={seat}>
-                    {isPast ? (
-                      <span className="font-semibold text-gray-400">{seat}</span>
-                    ) : (
+                    {canModify ? (
                       <button
                         type="button"
                         onClick={() => onSeatClick(booking)}
@@ -244,6 +259,8 @@ function MyBookingList({ bookings, isLoading, onSeatClick, emptyMessage }) {
                       >
                         {seat}
                       </button>
+                    ) : (
+                      <span className="font-semibold text-gray-400">{seat}</span>
                     )}
                     {index < booking.seats.length - 1 && ','}
                   </span>
@@ -251,6 +268,17 @@ function MyBookingList({ bookings, isLoading, onSeatClick, emptyMessage }) {
               </span>
               <span className="font-semibold text-white">{booking.totalPrice.toLocaleString()}원</span>
             </div>
+            {canModify && (
+              <div className="mt-2 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => onCancel(booking)}
+                  className="rounded-md bg-slate-800 px-3 py-1.5 text-xs font-semibold text-gray-300 hover:bg-rose-600 hover:text-white"
+                >
+                  예매 취소
+                </button>
+              </div>
+            )}
           </div>
         )
       })}
@@ -297,7 +325,8 @@ function MyReviewList({ reviews, onEdit, onDelete }) {
 }
 
 function MyPage() {
-  const { user } = useAuth()
+  const { user, logout } = useAuth()
+  const navigate = useNavigate()
   const { wishlistedIds, refresh: refreshWishlistedIds } = useWishlist()
   const [activeTab, setActiveTab] = useState(TABS[0])
   const [bookingFilter, setBookingFilter] = useState(BOOKING_FILTERS[0])
@@ -314,6 +343,11 @@ function MyPage() {
   const [savingGenres, setSavingGenres] = useState(false)
   const [showSavedDialog, setShowSavedDialog] = useState(false)
   const [seatMapBooking, setSeatMapBooking] = useState(null)
+  const [showChangePassword, setShowChangePassword] = useState(false)
+  const [showDeleteAccount, setShowDeleteAccount] = useState(false)
+  // 선호 장르 선택지 - 백엔드 MovieGenres.ALL이 유일한 출처라 하드코딩해두지 않고 받아옵니다
+  // ("전체"는 필터 사이드바 전용 옵션이라 여긴 받아온 목록 그대로 씁니다).
+  const [selectableGenres, setSelectableGenres] = useState([])
 
   const refreshMyReviews = () => {
     getMyReviews(user.id).then(setMyReviews)
@@ -331,6 +365,12 @@ function MyPage() {
     // 마이페이지에 들어올 때마다 서버 기준으로 다시 맞춥니다(안 그러면 방금 든 getWishlist 결과는 맞아도
     // 아래 visibleWishlistMovies 필터가 옛 상태로 걸러내 화면엔 안 보이는 문제가 있었습니다).
     refreshWishlistedIds()
+
+    getGenres()
+      .then((list) => {
+        if (!cancelled) setSelectableGenres(list)
+      })
+      .catch(() => {})
 
     getMyBookings(user.id)
       .then((bookingList) => {
@@ -387,6 +427,25 @@ function MyPage() {
     }
   }
 
+  const handleChangePassword = ({ currentPassword, newPassword }) =>
+    changePassword(user.id, { currentPassword, newPassword })
+
+  const handleCancelBooking = async (booking) => {
+    if (!window.confirm('이 예매를 취소하시겠습니까? 취소하면 되돌릴 수 없습니다.')) return
+    try {
+      await cancelBooking(user.id, booking.id)
+      refreshBookings()
+    } catch (error) {
+      window.alert(error.message)
+    }
+  }
+
+  const handleDeleteAccount = async (password) => {
+    await deleteAccount(user.id, password)
+    logout()
+    navigate('/login', { replace: true })
+  }
+
   const handleReviewEdit = (review) => {
     setEditingReview(review)
   }
@@ -433,6 +492,8 @@ function MyPage() {
   const profile = {
     nickname: user.nickname,
     joinedAt: formatJoinedAt(user.createdAt),
+    // 접속 시점 기준으로 이미 상영이 끝난 예매는 "현재 예매"로 보지 않고 제외합니다.
+    bookingCount: bookings.filter((booking) => !isPastShowing(booking)).length,
     reviewCount: myReviews.length,
     wishlistCount: wishlistedIds.size,
     watchedCount: watched.length,
@@ -440,11 +501,24 @@ function MyPage() {
 
   return (
     <div className="mx-auto max-w-6xl px-6 py-6">
-      <ProfileHeader user={profile} />
+      <ProfileHeader
+        user={profile}
+        onChangePassword={() => setShowChangePassword(true)}
+        onDeleteAccount={() => setShowDeleteAccount(true)}
+      />
+
+      {showChangePassword && (
+        <ChangePasswordDialog onClose={() => setShowChangePassword(false)} onSubmit={handleChangePassword} />
+      )}
+
+      {showDeleteAccount && (
+        <DeleteAccountDialog onClose={() => setShowDeleteAccount(false)} onSubmit={handleDeleteAccount} />
+      )}
 
       <AiTasteReport text={buildTasteReportText(savedGenres)} />
 
       <PreferredGenresCard
+        genres={selectableGenres}
         selected={preferredGenres}
         onToggle={handleToggleGenre}
         onSave={handleSaveGenres}
@@ -476,6 +550,7 @@ function MyPage() {
               bookings={filteredBookings}
               isLoading={bookingsLoading}
               onSeatClick={setSeatMapBooking}
+              onCancel={handleCancelBooking}
               emptyMessage={bookingEmptyMessage}
             />
           </>

@@ -43,6 +43,15 @@ public class MovieController {
     }
 
     /**
+     * 장르 필터 사이드바/마이페이지 선호 장르 선택지. MovieGenres.ALL 하나를 프론트와 AI 채팅(ChatService)이
+     * 공통으로 쓰는 출처로 삼아, 한쪽만 고쳐서 둘이 어긋나는 일이 없게 합니다.
+     */
+    @GetMapping("/api/movies/genres")
+    public List<String> getGenres() {
+        return MovieGenres.ALL;
+    }
+
+    /**
      * 예매 화면의 "상영중인 영화" 목록. 최근 4주(오늘 기준 releaseDts~releaseDte)에 개봉한 영화를 KMDB에서 가져옵니다.
      */
     @GetMapping("/api/movies/now-showing")

@@ -70,7 +70,7 @@ function PosterLink({ posterUrls = [], video, title }) {
         href={video.url}
         target="_blank"
         rel="noopener noreferrer"
-        className="group relative block aspect-[3/4] w-56 shrink-0 overflow-hidden rounded-xl bg-slate-800"
+        className="group relative mx-auto block aspect-[3/4] w-40 shrink-0 overflow-hidden rounded-xl bg-slate-800 sm:mx-0 sm:w-56"
       >
         {posterImage}
         {overlay}
@@ -80,7 +80,7 @@ function PosterLink({ posterUrls = [], video, title }) {
   }
 
   return (
-    <div className="group relative aspect-[3/4] w-56 shrink-0 overflow-hidden rounded-xl bg-slate-800">
+    <div className="group relative mx-auto aspect-[3/4] w-40 shrink-0 overflow-hidden rounded-xl bg-slate-800 sm:mx-0 sm:w-56">
       {posterImage}
       {overlay}
       {nav}

@@ -17,12 +17,17 @@ function toKmdbGenreParam(genre) {
   return slashIndex === -1 ? genre : genre.slice(0, slashIndex)
 }
 
-// 러닝타임은 KMDB 검색 파라미터에 없어 백엔드가 직접 걸러주는 우리 쪽 전용 값("under120"/"over120")입니다.
-// 화면 라벨("2시간 미만"/"2시간 이상")을 그 코드로 바꿔 보냅니다("전체"는 보내지 않음 = 필터 없음).
+// 러닝타임은 KMDB 검색 파라미터에 없어 백엔드가 직접 걸러주는 우리 쪽 전용 값("under120"/"over120"/
+// "unknown")입니다. 화면 라벨을 그 코드로 바꿔 보냅니다("전체"는 보내지 않음 = 필터 없음).
 const RUNTIME_PARAM_MAP = {
   '2시간 미만': 'under120',
   '2시간 이상': 'over120',
+  '정보 없음': 'unknown',
 }
+
+// 개봉연도의 "정보 없음"(개봉일자/제작연도가 둘 다 없어 연도 자체를 알 수 없는 영화)도 러닝타임과
+// 같은 방식으로 "unknown" 코드로 바꿔 보냅니다.
+const YEAR_UNKNOWN_LABEL = '정보 없음'
 
 /**
  * query가 빈 문자열이면 KMDB 전체 카탈로그를 대상으로 검색합니다(제목 필터 없음).
@@ -36,7 +41,7 @@ export function searchMovies(query, { genre, year, runtime, sort, page = 1, page
   const params = new URLSearchParams({ query, page, pageSize })
   const genreList = Array.isArray(genre) ? genre.filter(Boolean) : [genre].filter(Boolean)
   genreList.forEach((value) => params.append('genre', toKmdbGenreParam(value)))
-  if (year) params.set('year', year)
+  if (year) params.set('year', year === YEAR_UNKNOWN_LABEL ? 'unknown' : year)
   if (runtime && RUNTIME_PARAM_MAP[runtime]) params.set('runtime', RUNTIME_PARAM_MAP[runtime])
   if (sort) params.set('sort', sort)
   if (field) params.set('field', field)
@@ -45,6 +50,14 @@ export function searchMovies(query, { genre, year, runtime, sort, page = 1, page
 
 export function getMovieDetail(id) {
   return request(`/api/movies/${encodeURIComponent(id)}`)
+}
+
+/**
+ * 장르 필터 사이드바/마이페이지 선호 장르 선택지. 백엔드 MovieGenres.ALL이 유일한 출처라, 프론트에
+ * 장르 목록을 따로 하드코딩해두지 않고 항상 여기서 받아옵니다(한쪽만 바뀌어 어긋나는 일이 없도록).
+ */
+export function getGenres() {
+  return request('/api/movies/genres')
 }
 
 /**

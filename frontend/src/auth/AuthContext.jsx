@@ -35,8 +35,12 @@ export function AuthProvider({ children }) {
 
   const logout = () => setUser(null)
 
+  // 비밀번호 찾기로 임시 비밀번호를 발급받은 직후처럼, 이미 서버가 인증을 마치고 돌려준 사용자 정보를
+  // 다시 로그인 API 호출 없이 그대로 로그인 상태로 반영합니다.
+  const setSession = (nextUser) => setUser(nextUser)
+
   return (
-    <AuthContext.Provider value={{ user, login, signup, logout }}>{children}</AuthContext.Provider>
+    <AuthContext.Provider value={{ user, login, signup, logout, setSession }}>{children}</AuthContext.Provider>
   )
 }
 

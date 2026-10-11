@@ -56,7 +56,7 @@ function MovieCard({ movie }) {
           </button>
         </div>
       </div>
-      <p className="mt-2 truncate text-sm font-semibold text-gray-100">{title}</p>
+      <p className="mt-2 text-sm font-semibold text-gray-100">{title}</p>
       <p className="text-xs text-gray-400">
         {year}
         {genreLabel ? ` · ${genreLabel}` : ''}

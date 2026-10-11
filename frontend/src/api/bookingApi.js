@@ -24,3 +24,8 @@ export function changeBookingSeat(userId, bookingId, { fromSeatId, toSeatId }) {
     body: { fromSeatId, toSeatId },
   })
 }
+
+// 마이페이지 "예매 내역" 탭의 "예매 취소" - 좌석도 서버에서 함께 AVAILABLE로 되돌아갑니다.
+export function cancelBooking(userId, bookingId) {
+  return request(`/api/bookings/${bookingId}`, { method: 'DELETE', userId })
+}

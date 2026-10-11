@@ -1,16 +1,24 @@
 package com.moviepick.backend.screening;
 
+import com.moviepick.backend.movie.Movie;
+import com.moviepick.backend.movie.MovieRepository;
 import com.moviepick.backend.movie.MovieService;
 import com.moviepick.backend.movie.dto.MovieSummaryDto;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.DayOfWeek;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalTime;
+import java.time.format.DateTimeFormatter;
 import java.time.temporal.TemporalAdjusters;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -18,6 +26,8 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
+import java.util.stream.Collectors;
 
 /**
  * 매주 월요일 자정, 그 주(월~일) 상영정보를 상영중인 영화 목록으로부터 자동 생성합니다.
@@ -27,6 +37,7 @@ import java.util.Map;
  * 채우는 순서를 돌려서 상영 시작 시각이 매일 달라집니다. 같은 상영관 안에서는 시간이 절대 겹치지 않게
  * 배치하고, 상영 종료 후 20분의 정리시간을 반드시 비워둡니다.
  */
+@Slf4j
 @Service
 public class ScreeningGenerationService {
 
@@ -42,21 +53,33 @@ public class ScreeningGenerationService {
     private static final int SEAT_ROWS = 8; // A~H
     private static final int SEAT_COLS = 14;
 
+    // 매주 새로 상영정보를 생성할 때마다 그 주 상영정보를 사람이 보기 쉬운 파일로도 남겨두는 경로(프로젝트
+    // 루트의 "상영정보" 폴더) - 개발 중 생성 결과를 빠르게 확인하기 위한 용도라 이 프로젝트 전용 경로를
+    // 그대로 씁니다.
+    private static final String SCREENING_REPORT_DIR =
+            "C:\\2026_sesac_innogrid_cloud\\final-project\\2026_sesac_final_project\\상영정보";
+    private static final DateTimeFormatter REPORT_DATE_FORMAT = DateTimeFormatter.ofPattern("yyyy.MM.dd");
+    private static final DateTimeFormatter REPORT_ROW_DATE_FORMAT = DateTimeFormatter.ofPattern("MM.dd");
+    private static final DateTimeFormatter REPORT_TIME_FORMAT = DateTimeFormatter.ofPattern("HH:mm");
+
     private final MovieService movieService;
     private final TheaterRepository theaterRepository;
     private final ScreeningRepository screeningRepository;
     private final SeatRepository seatRepository;
+    private final MovieRepository movieRepository;
 
     public ScreeningGenerationService(
             MovieService movieService,
             TheaterRepository theaterRepository,
             ScreeningRepository screeningRepository,
-            SeatRepository seatRepository
+            SeatRepository seatRepository,
+            MovieRepository movieRepository
     ) {
         this.movieService = movieService;
         this.theaterRepository = theaterRepository;
         this.screeningRepository = screeningRepository;
         this.seatRepository = seatRepository;
+        this.movieRepository = movieRepository;
     }
 
     // "매주 월요일 자정"이라는 기준 시각은 아래 cron 하나로 정의해두되, 그 정확한 순간에 서버가 떠
@@ -110,6 +133,60 @@ public class ScreeningGenerationService {
             // 상영 1회조차 하루 운영시간에 안 들어가는(비정상적으로 긴 러닝타임) 영화만 배정 대상에서 뺍니다.
             List<MovieSummaryDto> eligible = movies.stream().filter(this::fitsAtLeastOneShow).toList();
             generateForDay(theaters, date, eligible, dayIndex, weeklyShowCount);
+        }
+
+        writeScreeningReport(monday, sunday);
+    }
+
+    // 방금 새로 생성한 한 주치 상영정보를 사람이 바로 훑어보기 좋은 형식으로 파일에 남겨둡니다(영화별로
+    // 묶어서 그 영화의 회차를 날짜/시간순으로 나열 - 한 줄씩 나열하는 CSV보다 가독성이 좋습니다). 이미
+    // 그 주 상영정보가 있어 재생성하지 않은 경우(위 existsByDateBetween에서 바로 return)는 이 메서드
+    // 자체가 호출되지 않으므로, 실제로 새로 만들었을 때만 파일도 새로 씁니다.
+    private void writeScreeningReport(LocalDate monday, LocalDate sunday) {
+        List<Screening> screenings = screeningRepository.findByDateBetweenOrderByDateAscStartTimeAsc(monday, sunday);
+        if (screenings.isEmpty()) {
+            return;
+        }
+
+        List<String> movieIds = screenings.stream().map(Screening::getMovieId).distinct().toList();
+        Map<String, String> titleByMovieId = movieRepository.findAllById(movieIds).stream()
+                .collect(Collectors.toMap(Movie::getMovieId, Movie::getTitle));
+
+        // TreeMap으로 제목 가나다(코드포인트) 순 정렬 - 같은 영화의 회차는 findByDateBetweenOrderByDateAscStartTimeAsc가
+        // 이미 날짜/시간순으로 가져다준 순서를 그대로 유지합니다.
+        Map<String, List<Screening>> byTitle = new TreeMap<>();
+        for (Screening screening : screenings) {
+            String title = titleByMovieId.getOrDefault(screening.getMovieId(), screening.getMovieId());
+            byTitle.computeIfAbsent(title, k -> new ArrayList<>()).add(screening);
+        }
+
+        StringBuilder content = new StringBuilder();
+        content.append("이번 주(%s ~ %s) 전체 영화 상영 정보\n"
+                .formatted(monday.format(REPORT_DATE_FORMAT), sunday.format(REPORT_DATE_FORMAT)));
+        content.append("=".repeat(50)).append("\n\n");
+        content.append("영화 %d편 · 총 %d회차\n\n".formatted(byTitle.size(), screenings.size()));
+
+        for (Map.Entry<String, List<Screening>> entry : byTitle.entrySet()) {
+            List<Screening> shows = entry.getValue();
+            content.append("[%s] (%d회차)\n".formatted(entry.getKey(), shows.size()));
+            for (Screening screening : shows) {
+                content.append("  - %s | %s | %s ~ %s\n".formatted(
+                        screening.getTheater().getName(),
+                        screening.getDate().format(REPORT_ROW_DATE_FORMAT),
+                        screening.getStartTime().format(REPORT_TIME_FORMAT),
+                        screening.getEndTime().format(REPORT_TIME_FORMAT)));
+            }
+            content.append('\n');
+        }
+
+        String fileName = "%s~%s 상영정보.txt".formatted(monday.format(REPORT_DATE_FORMAT), sunday.format(REPORT_DATE_FORMAT));
+        Path dir = Path.of(SCREENING_REPORT_DIR);
+        Path path = dir.resolve(fileName);
+        try {
+            Files.createDirectories(dir);
+            Files.writeString(path, content.toString(), StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            log.error("주간 상영정보 파일 저장 실패: {}", path, e);
         }
     }
 

@@ -54,6 +54,11 @@ public class ReviewService {
     }
 
     public ReviewDto create(String movieId, Long userId, ReviewRequest request) {
+        // 프론트의 "리뷰 쓰기" 버튼은 이미 리뷰를 쓴 영화면 비활성화하지만, AI 채팅처럼 그 버튼을 거치지
+        // 않는 경로로는 여전히 중복 작성이 가능했습니다(2026-10-11 실측) - 같은 규칙을 여기서도 강제합니다.
+        if (reviewRepository.existsByUserIdAndMovieId(userId, movieId)) {
+            throw new ApiException("이미 작성한 리뷰가 있습니다. 기존 리뷰를 수정해주세요.", HttpStatus.CONFLICT);
+        }
         User user = requireUser(userId);
         Review review = new Review(movieId, request.movieTitle(), user, request.score(), request.content());
         return ReviewDto.from(reviewRepository.save(review));

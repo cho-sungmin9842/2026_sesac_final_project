@@ -33,6 +33,10 @@ public final class KmdbTextUtils {
             return null;
         }
         String cleaned = value.replaceAll(HIGHLIGHT_MARKER_PATTERN, "").replaceAll("\\s+", " ").trim();
+        // KMDB 원본 데이터 중 일부("암살자 ( 들 )", "무너( )" 등, 2026-10-10 확인)가 괄호 앞뒤에 불필요한
+        // 공백을 그대로 담고 있어, 괄호가 있는 자리에서는 바로 붙은 모양으로 정리합니다. "제목(부제)"
+        // 형태로 공백 없이 붙여 쓰는 게 정상 표기라 이 보정은 안전합니다.
+        cleaned = cleaned.replace(" ( ", "(").replace("( ", "(").replace(" )", ")");
         return cleaned.isEmpty() ? null : cleaned;
     }
 
@@ -80,12 +84,15 @@ public final class KmdbTextUtils {
         return Integer.parseInt(cleaned);
     }
 
-    // runtimeFilter는 "under120"/"over120" 둘 중 하나거나(필터 없음은 null/빈 값) 들어옵니다. 상영시간이
-    // 없는(runtimeMinutes null) 영화는 "전체"에는 포함되지만, "미만"/"이상" 어느 쪽에도 속한다고 단정할 수
-    // 없으므로 구체적인 필터가 걸려 있을 땐 제외합니다.
+    // runtimeFilter는 "under120"/"over120"/"unknown" 중 하나거나(필터 없음은 null/빈 값) 들어옵니다.
+    // 상영시간이 없는(runtimeMinutes null) 영화는 "전체"에는 포함되지만, "미만"/"이상" 어느 쪽에도 속한다고
+    // 단정할 수 없으므로 그 둘을 고르면 제외하고, 반대로 "unknown"을 고르면 그 영화들만 보여줍니다.
     public static boolean matchesRuntimeFilter(Integer runtimeMinutes, String runtimeFilter) {
         if (runtimeFilter == null || runtimeFilter.isBlank()) {
             return true;
+        }
+        if ("unknown".equals(runtimeFilter)) {
+            return runtimeMinutes == null;
         }
         if (runtimeMinutes == null) {
             return false;

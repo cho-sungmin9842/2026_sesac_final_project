@@ -5,10 +5,10 @@ import { useState } from 'react'
 const EDGE_BLOCK_SIZE = 3
 
 function seatClassName(state, isAccessible) {
-  const accessibleRing = isAccessible ? 'ring-2 ring-blue-400 ring-offset-1 ring-offset-white' : ''
-  if (state === 'reserved') return `bg-gray-200 cursor-not-allowed ${accessibleRing}`
+  const accessibleRing = isAccessible ? 'ring-2 ring-blue-400 ring-offset-1 ring-offset-slate-950' : ''
+  if (state === 'reserved') return `bg-slate-700 cursor-not-allowed ${accessibleRing}`
   if (state === 'selected') return `bg-orange-500 ${accessibleRing}`
-  return `bg-gray-300 hover:bg-orange-200 ${accessibleRing}`
+  return `bg-gray-300 hover:bg-orange-300 ${accessibleRing}`
 }
 
 // seats: [{ id, rowLabel, colNo, seatType, status }] - 실제 screening의 좌석 배치도 그대로입니다.
@@ -25,11 +25,11 @@ function SeatMap({ seats, selectedSeats, onToggleSeat }) {
   return (
     <div>
       <div className="mb-4 flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-gray-700">좌석 배치도</h2>
+        <h2 className="text-sm font-semibold text-gray-300">좌석 배치도</h2>
         <button
           type="button"
           onClick={() => setShowAccessibleInfo((prev) => !prev)}
-          className="rounded-md bg-gray-100 px-3 py-1.5 text-xs font-semibold text-gray-600 hover:bg-gray-200"
+          className="rounded-md bg-slate-800 px-3 py-1.5 text-xs font-semibold text-gray-300 hover:bg-slate-700"
         >
           일반석 / 장애인석 구분
         </button>
@@ -40,6 +40,20 @@ function SeatMap({ seats, selectedSeats, onToggleSeat }) {
       </div>
 
       <div className="flex flex-col items-center gap-1.5">
+        <div className="flex items-center gap-1.5">
+          <span className="w-4" />
+          {Array.from({ length: colCount }, (_, i) => i + 1).map((colNo) => {
+            const isBlockStart = colNo !== 1 && (colNo === EDGE_BLOCK_SIZE + 1 || colNo === colCount - EDGE_BLOCK_SIZE + 1)
+            return (
+              <span
+                key={colNo}
+                className={`flex h-5 w-5 items-center justify-center text-[10px] text-gray-500 ${isBlockStart ? 'ml-4' : ''}`}
+              >
+                {colNo}
+              </span>
+            )
+          })}
+        </div>
         {rows.map((row) => (
           <div key={row} className="flex items-center gap-1.5">
             <span className="w-4 text-xs text-gray-400">{row}</span>
@@ -68,7 +82,7 @@ function SeatMap({ seats, selectedSeats, onToggleSeat }) {
         ))}
       </div>
 
-      <div className="mt-6 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-xs text-gray-500">
+      <div className="mt-6 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-xs text-gray-400">
         <span className="flex items-center gap-1.5">
           <span className="h-4 w-4 rounded-sm bg-gray-300" /> 선택 가능
         </span>
@@ -76,7 +90,7 @@ function SeatMap({ seats, selectedSeats, onToggleSeat }) {
           <span className="h-4 w-4 rounded-sm bg-orange-500" /> 선택됨
         </span>
         <span className="flex items-center gap-1.5">
-          <span className="h-4 w-4 rounded-sm bg-gray-200" /> 예약 완료
+          <span className="h-4 w-4 rounded-sm bg-slate-700" /> 예약 완료
         </span>
         <span className="flex items-center gap-1.5">
           <span className="h-4 w-4 rounded-sm bg-gray-300 ring-2 ring-blue-400" /> 장애인석
@@ -84,7 +98,7 @@ function SeatMap({ seats, selectedSeats, onToggleSeat }) {
       </div>
 
       {showAccessibleInfo && (
-        <p className="mx-auto mt-4 max-w-2xl rounded-md bg-blue-50 px-4 py-3 text-center text-xs leading-relaxed text-blue-700">
+        <p className="mx-auto mt-4 max-w-2xl rounded-md bg-blue-500/10 px-4 py-3 text-center text-xs leading-relaxed text-blue-300">
           배치 안내: 장애인(휠체어)석은 스크린과 가깝고 통로 진입이 쉬운 자리에 우선 배치합니다. 다른 관람객
           좌석을 지나치지 않고 편하게 이용하실 수 있으며, 일반 좌석과 동일하게 예매하실 수 있습니다.
         </p>

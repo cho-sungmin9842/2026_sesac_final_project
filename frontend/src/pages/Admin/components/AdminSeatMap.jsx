@@ -26,6 +26,20 @@ function AdminSeatMap({ seats }) {
       </div>
 
       <div className="flex flex-col items-center gap-1.5">
+        <div className="flex items-center gap-1.5">
+          <span className="w-4" />
+          {Array.from({ length: colCount }, (_, i) => i + 1).map((colNo) => {
+            const isBlockStart = colNo !== 1 && (colNo === EDGE_BLOCK_SIZE + 1 || colNo === colCount - EDGE_BLOCK_SIZE + 1)
+            return (
+              <span
+                key={colNo}
+                className={`flex h-5 w-5 items-center justify-center text-[10px] text-gray-500 ${isBlockStart ? 'ml-4' : ''}`}
+              >
+                {colNo}
+              </span>
+            )
+          })}
+        </div>
         {rows.map((row) => (
           <div key={row} className="flex items-center gap-1.5">
             <span className="w-4 text-xs text-gray-500">{row}</span>

@@ -5,6 +5,8 @@ import { getMovieDetail } from '../../api/movieApi'
 import { getScreenings, getScreeningSeats } from '../../api/screeningApi'
 import { createBooking } from '../../api/bookingApi'
 import PosterPlaceholder from '../../components/common/PosterPlaceholder'
+import ConfirmDialog from '../../components/common/ConfirmDialog'
+import InfoDialog from '../../components/common/InfoDialog'
 import SeatMap from './components/SeatMap'
 import TossPaymentWidget from './components/TossPaymentWidget'
 import {
@@ -44,7 +46,7 @@ function PillButton({ active, onClick, children }) {
       type="button"
       onClick={onClick}
       className={`rounded-lg px-4 py-2 text-sm font-semibold ${
-        active ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+        active ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-gray-300 hover:bg-slate-700'
       }`}
     >
       {children}
@@ -66,6 +68,10 @@ function BookingSeatPage() {
   const [selectedSeats, setSelectedSeats] = useState([])
   const [ticketCounts, setTicketCounts] = useState({ adult: 0, teen: 0, child: 0, senior: 0 })
   const [showPaymentWidget, setShowPaymentWidget] = useState(false)
+  // 네이티브 confirm/alert 대신 쓰는 커스텀 다이얼로그 상태들.
+  const [pendingWheelchairSeat, setPendingWheelchairSeat] = useState(null)
+  const [showPaymentConfirm, setShowPaymentConfirm] = useState(false)
+  const [resultDialog, setResultDialog] = useState(null) // { title, message, tone }
 
   // 영화 목록에서 "예매"를 눌러 이 페이지로 들어올 때, 이전 페이지의 스크롤 위치가 그대로 남아있어
   // 화면 중간부터 보이는 문제가 있어 항상 맨 위에서 시작하도록 맞춥니다.
@@ -154,22 +160,30 @@ function BookingSeatPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [screeningId])
 
-  const toggleSeat = (seat) => {
-    const isCurrentlySelected = selectedSeats.includes(seat.id)
-    if (!isCurrentlySelected && seat.seatType === 'WHEELCHAIR') {
-      const confirmed = window.confirm('장애인석을 선택했습니다.\n장애인석을 선택하시겠습니까?')
-      if (!confirmed) return
-    }
+  const applySeatSelection = (seat) => {
     setSelectedSeats((prev) =>
       prev.includes(seat.id) ? prev.filter((seatId) => seatId !== seat.id) : [...prev, seat.id],
     )
   }
 
-  const handleProceedToPayment = () => {
-    const confirmed = window.confirm('선택한 좌석을 변경할 수 없습니다. 결제 하시겠습니까?')
-    if (confirmed) {
-      setShowPaymentWidget(true)
+  // 장애인석(휠체어석)을 새로 선택하려는 경우에만, 실수로 누른 게 아닌지 커스텀 다이얼로그로 한 번 더
+  // 확인합니다(이미 선택된 장애인석을 다시 눌러 해제할 때는 확인 없이 바로 처리).
+  const toggleSeat = (seat) => {
+    const isCurrentlySelected = selectedSeats.includes(seat.id)
+    if (!isCurrentlySelected && seat.seatType === 'WHEELCHAIR') {
+      setPendingWheelchairSeat(seat)
+      return
     }
+    applySeatSelection(seat)
+  }
+
+  const confirmWheelchairSeat = () => {
+    if (pendingWheelchairSeat) applySeatSelection(pendingWheelchairSeat)
+    setPendingWheelchairSeat(null)
+  }
+
+  const handleProceedToPayment = () => {
+    setShowPaymentConfirm(true)
   }
 
   const updateTicketCount = (key, delta) => {
@@ -199,33 +213,35 @@ function BookingSeatPage() {
   const handlePaymentComplete = async () => {
     try {
       const booking = await createBooking(user.id, { screeningId, seatIds: selectedSeats, ticketCounts })
-      window.alert(
-        `결제가 완료되었습니다!\n"${booking.movieTitle}" ${booking.theaterName} ${booking.showDate} ${booking.showtime}\n` +
+      setResultDialog({
+        title: '결제가 완료됐어요 🎬',
+        message:
+          `"${booking.movieTitle}" ${booking.theaterName} ${booking.showDate} ${booking.showtime}\n` +
           `좌석: ${booking.seats.join(', ')} · ${booking.totalPrice.toLocaleString()}원`,
-      )
+      })
       setSelectedSeats([])
       setTicketCounts({ adult: 0, teen: 0, child: 0, senior: 0 })
       setShowPaymentWidget(false)
       refreshSeats()
     } catch (error) {
-      window.alert(error.message)
+      setResultDialog({ title: '결제에 실패했어요', message: error.message, tone: 'error' })
       refreshSeats()
     }
   }
 
   return (
-    <div className="min-h-svh bg-white text-gray-900">
-      <div className="mx-auto max-w-4xl px-6 py-8">
-        <Link to="/booking" className="text-sm text-indigo-600 hover:underline">
+    <div className="min-h-svh bg-slate-950 text-gray-100">
+      <div className="mx-auto max-w-4xl px-4 py-8 sm:px-6">
+        <Link to="/booking" className="text-sm text-indigo-400 hover:text-indigo-300 hover:underline">
           ← 상영중인 영화 목록으로
         </Link>
 
-        {status === 'loading' && <p className="mt-6 text-gray-500">불러오는 중...</p>}
-        {status === 'error' && <p className="mt-6 text-red-500">영화 정보를 불러오지 못했습니다.</p>}
+        {status === 'loading' && <p className="mt-6 text-gray-400">불러오는 중...</p>}
+        {status === 'error' && <p className="mt-6 text-red-400">영화 정보를 불러오지 못했습니다.</p>}
 
         {status === 'ready' && (
           <>
-            <div className="mt-4 flex items-center gap-4 border-b border-gray-200 pb-6">
+            <div className="mt-4 flex items-center gap-4 border-b border-white/10 pb-6">
               <div className="h-24 w-16 shrink-0 overflow-hidden rounded-lg">
                 {movie.posterUrl ? (
                   <img src={movie.posterUrl} alt={movie.title} className="h-full w-full object-cover" />
@@ -235,7 +251,7 @@ function BookingSeatPage() {
               </div>
               <div>
                 <h1 className="text-xl font-bold">{movie.title}</h1>
-                <p className="mt-1 text-sm text-gray-500">
+                <p className="mt-1 text-sm text-gray-400">
                   {['새싹시네마', theater, movie.runtimeMinutes ? `${movie.runtimeMinutes}분` : null, movie.ageRating]
                     .filter(Boolean)
                     .join(' · ')}
@@ -244,14 +260,14 @@ function BookingSeatPage() {
             </div>
 
             {!hasScreenings && (
-              <p className="mt-6 text-sm text-gray-500">이번 주에는 이 영화의 상영 일정이 없습니다.</p>
+              <p className="mt-6 text-sm text-gray-400">이번 주에는 이 영화의 상영 일정이 없습니다.</p>
             )}
 
             {hasScreenings && (
               <>
-                <div className="grid grid-cols-1 gap-6 border-b border-gray-200 py-6 sm:grid-cols-3">
+                <div className="grid grid-cols-1 gap-6 border-b border-white/10 py-6 sm:grid-cols-3">
                   <div>
-                    <h2 className="mb-2 text-sm font-semibold text-gray-500">상영관</h2>
+                    <h2 className="mb-2 text-sm font-semibold text-gray-400">상영관</h2>
                     <div className="flex flex-wrap gap-2">
                       {theaterOptions.map((name) => (
                         <PillButton key={name} active={theater === name} onClick={() => setTheater(name)}>
@@ -262,7 +278,7 @@ function BookingSeatPage() {
                   </div>
 
                   <div>
-                    <h2 className="mb-2 text-sm font-semibold text-gray-500">날짜</h2>
+                    <h2 className="mb-2 text-sm font-semibold text-gray-400">날짜</h2>
                     <div className="flex flex-wrap gap-2">
                       {dateOptions.map((date) => (
                         <PillButton
@@ -277,10 +293,10 @@ function BookingSeatPage() {
                   </div>
 
                   <div>
-                    <h2 className="mb-2 text-sm font-semibold text-gray-500">회차</h2>
+                    <h2 className="mb-2 text-sm font-semibold text-gray-400">회차</h2>
                     <div className="flex flex-wrap gap-2">
                       {showtimeOptions.length === 0 && (
-                        <p className="text-sm text-gray-400">선택한 날짜에 상영 회차가 없습니다.</p>
+                        <p className="text-sm text-gray-500">선택한 날짜에 상영 회차가 없습니다.</p>
                       )}
                       {showtimeOptions.map((time) => (
                         <PillButton key={time} active={showtime === time} onClick={() => setShowtime(time)}>
@@ -291,12 +307,12 @@ function BookingSeatPage() {
                   </div>
                 </div>
 
-                <div className="border-b border-gray-200 py-6">
+                <div className="border-b border-white/10 py-6">
                   <div className="mb-3 flex items-center gap-2">
-                    <h2 className="text-sm font-semibold text-gray-500">인원 선택</h2>
+                    <h2 className="text-sm font-semibold text-gray-400">인원 선택</h2>
                     <span
                       className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
-                        holidayPricing ? 'bg-rose-100 text-rose-600' : 'bg-indigo-100 text-indigo-600'
+                        holidayPricing ? 'bg-rose-500/20 text-rose-300' : 'bg-indigo-500/20 text-indigo-300'
                       }`}
                     >
                       {TIME_PERIOD_LABELS[timePeriod]} · {holidayPricing ? '주말·공휴일 요금' : '주중 요금'}
@@ -309,18 +325,18 @@ function BookingSeatPage() {
                         <div
                           key={category.key}
                           className={`flex items-center justify-between rounded-lg border px-4 py-3 ${
-                            disallowed ? 'border-gray-100 bg-gray-50 opacity-60' : 'border-gray-200'
+                            disallowed ? 'border-white/5 bg-slate-900/50 opacity-60' : 'border-white/10'
                           }`}
                         >
                           <div>
-                            <p className="text-sm font-semibold text-gray-900">{category.label}</p>
-                            <p className="text-xs text-gray-500">{category.sublabel}</p>
+                            <p className="text-sm font-semibold text-gray-100">{category.label}</p>
+                            <p className="text-xs text-gray-400">{category.sublabel}</p>
                             {disallowed ? (
-                              <p className="mt-0.5 text-xs font-medium text-rose-500">
+                              <p className="mt-0.5 text-xs font-medium text-rose-400">
                                 {movie.ageRating} 영화라 선택할 수 없어요
                               </p>
                             ) : (
-                              <p className="mt-0.5 text-xs text-gray-500">
+                              <p className="mt-0.5 text-xs text-gray-400">
                                 {priceFor(category.key, showDate, showtime).toLocaleString()}원
                               </p>
                             )}
@@ -330,7 +346,7 @@ function BookingSeatPage() {
                               type="button"
                               disabled={disallowed}
                               onClick={() => updateTicketCount(category.key, -1)}
-                              className="flex h-7 w-7 items-center justify-center rounded-full bg-gray-100 text-gray-700 hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-50"
+                              className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-800 text-gray-300 hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
                             >
                               -
                             </button>
@@ -339,7 +355,7 @@ function BookingSeatPage() {
                               type="button"
                               disabled={disallowed}
                               onClick={() => updateTicketCount(category.key, 1)}
-                              className="flex h-7 w-7 items-center justify-center rounded-full bg-gray-100 text-gray-700 hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-50"
+                              className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-800 text-gray-300 hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
                             >
                               +
                             </button>
@@ -349,7 +365,7 @@ function BookingSeatPage() {
                     })}
                   </div>
                   {totalTickets > 0 && (
-                    <p className="mt-3 text-xs text-gray-500">
+                    <p className="mt-3 text-xs text-gray-400">
                       총 {totalTickets}명 · 좌석을 {totalTickets}석 선택해주세요.
                     </p>
                   )}
@@ -359,21 +375,21 @@ function BookingSeatPage() {
                   <SeatMap seats={seats} selectedSeats={selectedSeats} onToggleSeat={toggleSeat} />
                 </div>
 
-                <div className="flex items-center justify-between border-t border-gray-200 pt-6">
+                <div className="flex flex-col gap-4 border-t border-white/10 pt-6 sm:flex-row sm:items-center sm:justify-between">
                   <div>
-                    <p className="text-sm text-gray-600">
+                    <p className="text-sm text-gray-400">
                       선택 좌석:{' '}
                       {selectedSeatLabels.length > 0 ? (
-                        <span className="font-semibold text-indigo-600">
+                        <span className="font-semibold text-indigo-400">
                           {selectedSeatLabels.join(', ')} ({selectedSeatLabels.length}석)
                         </span>
                       ) : (
                         '없음'
                       )}
                     </p>
-                    {totalTickets === 0 && <p className="mt-1 text-xs text-rose-500">인원을 먼저 선택해주세요.</p>}
+                    {totalTickets === 0 && <p className="mt-1 text-xs text-rose-400">인원을 먼저 선택해주세요.</p>}
                     {totalTickets > 0 && !seatsMatchTickets && (
-                      <p className="mt-1 text-xs text-rose-500">
+                      <p className="mt-1 text-xs text-rose-400">
                         선택한 인원({totalTickets}명)만큼 좌석을 선택해주세요.
                       </p>
                     )}
@@ -384,7 +400,7 @@ function BookingSeatPage() {
                       type="button"
                       disabled={!seatsMatchTickets}
                       onClick={handleProceedToPayment}
-                      className="rounded-lg bg-indigo-600 px-6 py-3 text-sm font-semibold text-white hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-gray-300"
+                      className="rounded-lg bg-indigo-600 px-6 py-3 text-sm font-semibold text-white hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-gray-500"
                     >
                       결제하기
                     </button>
@@ -392,7 +408,7 @@ function BookingSeatPage() {
                 </div>
 
                 {showPaymentWidget && (
-                  <div className="mt-6 border-t border-gray-200 pt-6">
+                  <div className="mt-6 border-t border-white/10 pt-6">
                     <TossPaymentWidget amount={totalPrice} onComplete={handlePaymentComplete} />
                   </div>
                 )}
@@ -401,6 +417,38 @@ function BookingSeatPage() {
           </>
         )}
       </div>
+
+      {pendingWheelchairSeat && (
+        <ConfirmDialog
+          title="장애인석을 선택했습니다"
+          message="장애인석을 선택하시겠습니까?"
+          confirmLabel="선택"
+          onConfirm={confirmWheelchairSeat}
+          onCancel={() => setPendingWheelchairSeat(null)}
+        />
+      )}
+
+      {showPaymentConfirm && (
+        <ConfirmDialog
+          title="결제 확인"
+          message={'선택한 좌석은 결제 후에는 변경할 수 없습니다.\n결제하시겠습니까?'}
+          confirmLabel="결제하기"
+          onConfirm={() => {
+            setShowPaymentConfirm(false)
+            setShowPaymentWidget(true)
+          }}
+          onCancel={() => setShowPaymentConfirm(false)}
+        />
+      )}
+
+      {resultDialog && (
+        <InfoDialog
+          title={resultDialog.title}
+          message={resultDialog.message}
+          tone={resultDialog.tone}
+          onClose={() => setResultDialog(null)}
+        />
+      )}
     </div>
   )
 }

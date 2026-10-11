@@ -2,16 +2,18 @@ package com.moviepick.backend.booking;
 
 import java.time.DayOfWeek;
 import java.time.LocalDate;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
 /**
  * 연령 구분별 요금표. 시간대(조조/일반/심야) x 주중(월~목)/주말(금~일)·공휴일로 요금이 달라집니다.
  * 프론트(bookingData.js)와 값을 맞춰뒀습니다 - 가격을 바꿀 때는 두 군데 다 고쳐야 합니다.
+ * AI 채팅의 "요금표 알려줘" 응답(ChatService)도 이 요금표를 그대로 씁니다.
  */
-final class TicketPricing {
+public final class TicketPricing {
 
-    enum TimePeriod {
+    public enum TimePeriod {
         MORNING, // 조조 08:00~10:00
         NORMAL, // 일반 10:00~21:00
         LATE_NIGHT // 심야 21:00~23:00
@@ -57,17 +59,22 @@ final class TicketPricing {
             LocalDate.of(2026, 12, 25) // 성탄절
     );
 
+    // AI 채팅이 시간대 이름을 사람이 읽는 라벨로 보여줄 때 씁니다(프론트 TIME_PERIOD_LABELS와 동일).
+    public static final Map<TimePeriod, String> TIME_PERIOD_LABELS = Map.of(
+            TimePeriod.MORNING, "조조", TimePeriod.NORMAL, "일반", TimePeriod.LATE_NIGHT, "심야"
+    );
+
     private TicketPricing() {
     }
 
-    static boolean isWeekendOrHoliday(LocalDate date) {
+    public static boolean isWeekendOrHoliday(LocalDate date) {
         DayOfWeek day = date.getDayOfWeek();
         return day == DayOfWeek.FRIDAY || day == DayOfWeek.SATURDAY || day == DayOfWeek.SUNDAY
                 || HOLIDAYS_2026.contains(date);
     }
 
     // showtime은 "HH:mm" 형식의 상영 시작 시각입니다. 10시/21시 경계는 각각 일반/심야 쪽에 포함됩니다.
-    static TimePeriod timePeriodFor(String showtime) {
+    public static TimePeriod timePeriodFor(String showtime) {
         int hour = Integer.parseInt(showtime.substring(0, showtime.indexOf(':')));
         if (hour < 10) {
             return TimePeriod.MORNING;
@@ -78,11 +85,33 @@ final class TicketPricing {
         return TimePeriod.LATE_NIGHT;
     }
 
-    static int priceFor(String category, LocalDate date, String showtime) {
+    public static int priceFor(String category, LocalDate date, String showtime) {
+        return priceFor(category, timePeriodFor(showtime), isWeekendOrHoliday(date));
+    }
+
+    // 실제 상영 회차(날짜/시각) 없이, 시간대+주중·주말 구분만으로 요금을 조회합니다 - AI 채팅의 "영화 요금표
+    // 알려줘"(특정 영화/회차 지정 없이)처럼 전체 요금표를 보여줄 때 씁니다.
+    public static int priceFor(String category, TimePeriod period, boolean weekendOrHoliday) {
         CategoryPrices prices = PRICES.get(category);
         if (prices == null) {
             return 0;
         }
-        return prices.forPeriod(timePeriodFor(showtime)).forDate(date);
+        Price price = prices.forPeriod(period);
+        return weekendOrHoliday ? price.weekendOrHoliday() : price.weekday();
+    }
+
+    // 요금표를 통째로 보여줄 때 카테고리를 표시 순서(성인→청소년→어린이→우대)대로 순회하기 위함입니다.
+    public static List<String> categoryOrder() {
+        return List.of("adult", "teen", "child", "senior");
+    }
+
+    public static String categoryLabel(String category) {
+        return switch (category) {
+            case "adult" -> "성인";
+            case "teen" -> "청소년";
+            case "child" -> "어린이";
+            case "senior" -> "우대";
+            default -> category;
+        };
     }
 }

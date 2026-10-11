@@ -114,7 +114,9 @@ public class MovieMapper {
 
     // 개봉연도는 ratings.rating[].releaseDate(yyyyMMdd)의 앞 4자리(yyyy)를 씁니다. 값이 없는 옛날/소규모
     // 개봉작은 releaseDate가 비어있는 경우가 있어, 그때만 prodYear(제작연도)로 대신합니다.
-    private Integer toYear(KmdbMovieItem item) {
+    // MovieCountCacheService가 "개봉연도" 필터/건수 집계에서 화면에 보이는 연도와 똑같은 기준으로
+    // 세어야 해서(안 그러면 개봉일자만 기준으로 세게 되어 건수가 실제 화면 표시와 어긋남) public으로 둡니다.
+    public Integer toYear(KmdbMovieItem item) {
         String releaseYear = firstReleaseYear(item);
         if (releaseYear != null) {
             return Integer.parseInt(releaseYear);

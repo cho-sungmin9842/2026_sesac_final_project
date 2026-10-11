@@ -17,6 +17,10 @@ public interface ReviewRepository extends JpaRepository<Review, Long> {
     // 마이페이지 "내가 쓴 리뷰" 탭 - 영화 구분 없이 이 사용자가 쓴 모든 리뷰.
     List<Review> findByUserIdOrderByCreatedAtDesc(Long userId);
 
+    // 한 사용자가 같은 영화에 리뷰를 두 번 쓰지 못하게 막는 용도(프론트의 "리뷰 쓰기" 버튼 비활성화와
+    // 같은 규칙을 서버에서도 강제 - AI 채팅처럼 그 버튼을 거치지 않는 경로로도 중복 작성되지 않도록).
+    boolean existsByUserIdAndMovieId(Long userId, String movieId);
+
     // 관리자 "회원 관리" 화면 - 회원별 작성 리뷰 수.
     long countByUserId(Long userId);
 

@@ -168,6 +168,19 @@ CREATE TABLE IF NOT EXISTS movie_count_cache (
     PRIMARY KEY (genre_key, year_key, runtime_key)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
 
+-- 개봉연도로 필터링할 때(movie_count_cache와 같은 전체 스캔에서 함께 채워집니다) 실제 영화 목록을
+-- KMDB를 다시 부르지 않고 바로 꺼내 쓰기 위한 색인입니다. display_order는 스캔 당시 KMDB 정렬(최신순)
+-- 순서를 그대로 보존합니다. 장르 하나당 스캔이 다시 돌 때마다 그 genre_key의 행을 통째로 지우고
+-- 새로 채웁니다(MovieCountCacheService 참고).
+CREATE TABLE IF NOT EXISTS movie_year_index (
+    genre_key     VARCHAR(50) NOT NULL,
+    year_key      VARCHAR(10) NOT NULL,
+    movie_id      VARCHAR(64) NOT NULL,
+    display_order INT         NOT NULL,
+    PRIMARY KEY (genre_key, year_key, movie_id),
+    INDEX idx_movie_year_index_lookup (genre_key, year_key, display_order)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
+
 -- 상영관 마스터 데이터. 1관/2관 두 개만 고정으로 존재합니다.
 CREATE TABLE IF NOT EXISTS theaters (
     id   BIGINT AUTO_INCREMENT PRIMARY KEY,

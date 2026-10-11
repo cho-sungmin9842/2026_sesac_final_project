@@ -43,6 +43,7 @@ public class MovieService {
     private final MovieCacheService movieCacheService;
     private final NowShowingSnapshotRepository nowShowingSnapshotRepository;
     private final MovieCountCacheService movieCountCacheService;
+    private final MovieYearIndexRepository movieYearIndexRepository;
 
     public MovieService(
             KmdbClient kmdbClient,
@@ -50,7 +51,8 @@ public class MovieService {
             ReviewService reviewService,
             MovieCacheService movieCacheService,
             NowShowingSnapshotRepository nowShowingSnapshotRepository,
-            MovieCountCacheService movieCountCacheService
+            MovieCountCacheService movieCountCacheService,
+            MovieYearIndexRepository movieYearIndexRepository
     ) {
         this.kmdbClient = kmdbClient;
         this.movieMapper = movieMapper;
@@ -58,11 +60,18 @@ public class MovieService {
         this.movieCacheService = movieCacheService;
         this.nowShowingSnapshotRepository = nowShowingSnapshotRepository;
         this.movieCountCacheService = movieCountCacheService;
+        this.movieYearIndexRepository = movieYearIndexRepository;
     }
 
+    // 개봉연도의 "정보 없음" 필터 코드 - movieApi.js가 "정보 없음" 라벨을 이 값으로 바꿔 보냅니다
+    // (러닝타임의 "unknown"과 같은 개념). 실제 연도 숫자가 아니므로 KMDB의 releaseDts/Dte로는 절대
+    // 걸러낼 수 없어서(날짜 범위 자체를 만들 수 없음), 연도 필터와 똑같이 movie.year() == null로 직접 거릅니다.
+    private static final String YEAR_UNKNOWN_FILTER = "unknown";
+
     public MovieSearchResultDto search(String query, List<String> genres, String year, String runtime, String sort, int page, int pageSize, String field) {
-        String releaseDts = year == null || year.isBlank() ? null : year + "0101";
-        String releaseDte = year == null || year.isBlank() ? null : year + "1231";
+        boolean isUnknownYear = YEAR_UNKNOWN_FILTER.equals(year);
+        String releaseDts = year == null || year.isBlank() || isUnknownYear ? null : year + "0101";
+        String releaseDte = year == null || year.isBlank() || isUnknownYear ? null : year + "1231";
         List<String> cleanGenres = genres == null ? List.of() : genres.stream().filter(g -> g != null && !g.isBlank()).toList();
         boolean hasQuery = query != null && !query.isBlank();
         // 최신순 -> prodYear,1 / 이름순 -> title,0. KMDB가 직접 지원하는 정렬이라 응답 자체가 이미 정렬돼서 옵니다.
@@ -85,14 +94,29 @@ public class MovieService {
             // 나눠서, 500건 밖의 페이지로 가면 빈 목록만 보였습니다).
             String genre = cleanGenres.isEmpty() ? null : cleanGenres.get(0);
             int startCount = (page - 1) * pageSize;
-            FilledPage filled = fetchFilledPage(field, query, genre, releaseDts, releaseDte, runtime, pageSize, startCount, kmdbSort);
+            boolean hasYearFilter = year != null && !year.isBlank();
+
+            List<MovieSummaryDto> pageMovies;
+            int fallbackEstimate;
+            // 연도 필터가 있고 그 (장르, 연도) 조합의 전체 스캔이 끝나 있으면, KMDB를 다시 부르지 않고
+            // movie_year_index + movies 캐시에서 바로 목록을 꺼냅니다(fetchFilledPage의 "날짜 제한 없이
+            // 넓게 받아와 직접 거르기" 방식은 2024년처럼 최신순 상위에 몰린 연도가 많으면 탐색 범위 안에
+            // 그 연도 항목이 하나도 안 걸려 빈 목록이 나올 수 있었습니다).
+            if (hasYearFilter && movieCountCacheService.hasFreshYearIndex(genre, year)) {
+                pageMovies = fetchYearIndexedPage(genre, year, runtime, sort, page, pageSize);
+                fallbackEstimate = pageMovies.size();
+            } else {
+                FilledPage filled = fetchFilledPage(field, query, genre, releaseDts, releaseDte, runtime, year, pageSize, startCount, kmdbSort);
+                pageMovies = filled.movies();
+                fallbackEstimate = filled.totalCount();
+            }
             // 화면에 보이는 건수(nation이 정확히 "대한민국"이고 러닝타임 필터까지 통과한 영화만 센 값)가
-            // 어긋나지 않도록, 이번 페이지 안에서만 계산한 추정치(filled.totalCount()) 대신 전체 카탈로그를
+            // 어긋나지 않도록, 이번 페이지 안에서만 계산한 추정치(fallbackEstimate) 대신 전체 카탈로그를
             // 훑어 캐시해둔 정확한 건수를 씁니다. 아직 캐시가 없으면(첫 조회) 그 추정치를 그대로 보여주고,
             // 정확한 값은 백그라운드에서 계산되는 대로 다음 요청부터 반영됩니다.
-            int totalCount = movieCountCacheService.getDomesticTotalCount(genre, year, runtime, filled.totalCount());
+            int totalCount = movieCountCacheService.getDomesticTotalCount(genre, year, runtime, fallbackEstimate);
             int totalPages = totalCount == 0 ? 0 : (int) Math.ceil(totalCount / (double) pageSize);
-            return new MovieSearchResultDto(filled.movies(), page, pageSize, totalCount, totalPages);
+            return new MovieSearchResultDto(pageMovies, page, pageSize, totalCount, totalPages);
         }
 
         // 검색어가 있거나 장르를 여러 개 고른 경우는 KMDB 응답을 텍스트로 한 번 더 거르거나 여러 번 합쳐야 해서,
@@ -101,23 +125,34 @@ public class MovieService {
         int rawListCount = KMDB_MAX_LIST_COUNT;
         List<MovieSummaryDto> allMovies;
 
+        // 개봉연도 필터는 화면에 보이는 연도(개봉일자 우선, 없으면 제작연도)와 같은 기준으로 걸러야 하는데
+        // KMDB의 releaseDts/Dte는 개봉일자만 보고 제작연도로의 대체가 없어서(자세한 이유는 fetchFilledPage
+        // 주석 참고), 연도 필터가 있을 땐 KMDB에 날짜 제한 없이 요청하고 아래에서 movie.year()로 직접 거릅니다.
+        boolean hasYearFilter = year != null && !year.isBlank();
+        String effectiveReleaseDts = hasYearFilter ? null : releaseDts;
+        String effectiveReleaseDte = hasYearFilter ? null : releaseDte;
+
         if (cleanGenres.size() > 1) {
             // KMDB genre 파라미터는 한 번에 장르 하나만 받기 때문에(부분일치), 선호 장르가 여러 개(홈 화면
             // "취향저격 신작 (장르: 코미디, 스릴러, 액션)"처럼)로 필터링할 땐 장르별로 따로 호출한 뒤 합쳐야 합니다.
-            allMovies = searchByMultipleGenres(query, cleanGenres, releaseDts, releaseDte, rawListCount, field, kmdbSort);
+            allMovies = searchByMultipleGenres(query, cleanGenres, effectiveReleaseDts, effectiveReleaseDte, rawListCount, field, kmdbSort);
         } else {
             String genre = cleanGenres.isEmpty() ? null : cleanGenres.get(0);
             // 검색창의 영화/배우/감독 드롭다운이 고른 필드로, 해외 영화를 뺀 국내 영화만, 정렬까지 맞춰서
             // KMDB에 요청합니다(KmdbClient가 nation=대한민국을 항상 붙입니다).
-            KmdbSearchResponse response = searchByField(field, query, genre, releaseDts, releaseDte, rawListCount, 0, kmdbSort);
+            KmdbSearchResponse response = searchByField(field, query, genre, effectiveReleaseDts, effectiveReleaseDte, rawListCount, 0, kmdbSort);
             // KMDB는 검색어를 형태소 단위로 쪼개 부분 일치시켜 관련 없는 결과까지 섞어 내려주므로,
             // 실제로 검색어를 포함하는 항목만 한 번 더 걸러냅니다.
             List<KmdbMovieItem> matchedItems = filterByQuery(response.allItems(), field, query);
             allMovies = toRatedSummaries(matchedItems);
         }
 
-        // 러닝타임은 KMDB 검색 파라미터에 없어 응답을 받은 뒤 직접 거릅니다(500건 한도 안에서만 정확).
-        allMovies = allMovies.stream().filter(movie -> KmdbTextUtils.matchesRuntimeFilter(movie.runtimeMinutes(), runtime)).toList();
+        // 러닝타임/개봉연도는 KMDB 검색 파라미터로 정확히 거를 수 없어 응답을 받은 뒤 직접 거릅니다
+        // (500건 한도 안에서만 정확).
+        allMovies = allMovies.stream()
+                .filter(movie -> KmdbTextUtils.matchesRuntimeFilter(movie.runtimeMinutes(), runtime))
+                .filter(movie -> matchesYearFilter(movie.year(), year))
+                .toList();
         allMovies = sortMovies(allMovies, sort);
 
         int fromIndex = Math.min((page - 1) * pageSize, allMovies.size());
@@ -257,7 +292,7 @@ public class MovieService {
         String releaseDts = date.minusWeeks(4).format(KMDB_DATE_FORMAT);
         // 날짜마다 실제 개봉작 수(KMDB TotalCount)가 다르므로 고정 건수로 자르지 않고, KMDB 한 번 호출 한도
         // (KMDB_MAX_LIST_COUNT)까지 요청해서 그날 "상영중"인 영화 전체를 빠짐없이 받아옵니다.
-        FilledPage filled = fetchFilledPage("title", "", null, releaseDts, releaseDte, null, KMDB_MAX_LIST_COUNT, 0, null);
+        FilledPage filled = fetchFilledPage("title", "", null, releaseDts, releaseDte, null, null, KMDB_MAX_LIST_COUNT, 0, null);
         List<MovieSummaryDto> sorted = sortMovies(filled.movies(), "name");
 
         List<NowShowingSnapshot> toSave = new ArrayList<>();
@@ -279,26 +314,35 @@ public class MovieService {
     private static final int RUNTIME_FILTERED_FETCH_SIZE = 300;
 
     // KMDB의 startCount/listCount로 이번 페이지 구간을 받아온 뒤 제목 없는 항목, 해외 공동제작 작품
-    // (isDomesticOnly가 걸러내는, nation이 "대한민국" 단독이 아닌 항목), 러닝타임 필터에 안 맞는 항목이
-    // 걸러져서 pageSize보다 모자라면, 이어지는 구간을 추가로 더 받아와 정확히 pageSize개를 채웁니다.
+    // (isDomesticOnly가 걸러내는, nation이 "대한민국" 단독이 아닌 항목), 러닝타임/개봉연도 필터에 안 맞는
+    // 항목이 걸러져서 pageSize보다 모자라면, 이어지는 구간을 추가로 더 받아와 정확히 pageSize개를 채웁니다.
     // totalCount는 KMDB가 알려주는 전체 건수에서 "이번 페이지를 채우는 동안" 걸러낸 개수만큼을 뺀 값입니다 -
     // 카탈로그 전체에서 걸러지는 항목이 정확히 몇 건인지는 몇 만 건을 전부 훑어야 알 수 있어 매 요청마다
-    // 계산하지 않으므로, 다른 페이지에서는 이 보정이 반영되지 않을 수 있습니다.
+    // 계산하지 않으므로, 다른 페이지에서는 이 보정이 반영되지 않을 수 있습니다(화면 상단 "N건"은 이 값
+    // 대신 MovieCountCacheService가 전체 카탈로그를 훑어 캐시해둔 정확한 값을 씁니다).
     private FilledPage fetchFilledPage(
             String field, String query, String genre, String releaseDts, String releaseDte, String runtime,
-            int pageSize, int startCount, String sort
+            String year, int pageSize, int startCount, String sort
     ) {
         List<MovieSummaryDto> collected = new ArrayList<>();
         int currentStart = startCount;
         int rawTotalCount = 0;
         int skipped = 0;
         boolean hasRuntimeFilter = runtime != null && !runtime.isBlank();
+        boolean hasYearFilter = year != null && !year.isBlank();
+        // 개봉연도 필터는 화면에 보이는 연도(개봉일자 우선, 없으면 제작연도 - MovieMapper.toYear 참고)와
+        // 똑같은 기준으로 걸러야 합니다. KMDB의 releaseDts/Dte는 개봉일자만 보고 제작연도로의 대체가 없어서,
+        // 이 파라미터를 그대로 걸면 제작연도로만 표시되는(개봉일자가 없는) 영화가 전부 빠집니다(실측:
+        // 연도별로 걸러보면 전체의 82%가 누락 - MovieCountCacheService 주석 참고). 그래서 연도 필터가
+        // 있을 땐 KMDB에는 날짜 제한 없이 요청하고, 응답을 받은 뒤 movie.year()로 직접 거릅니다.
+        String effectiveReleaseDts = hasYearFilter ? null : releaseDts;
+        String effectiveReleaseDte = hasYearFilter ? null : releaseDte;
 
         for (int attempt = 0; attempt < FILL_PAGE_MAX_ATTEMPTS && collected.size() < pageSize; attempt++) {
-            int need = hasRuntimeFilter
+            int need = (hasRuntimeFilter || hasYearFilter)
                     ? RUNTIME_FILTERED_FETCH_SIZE
                     : pageSize - collected.size();
-            KmdbSearchResponse response = searchByField(field, query, genre, releaseDts, releaseDte, need, currentStart, sort);
+            KmdbSearchResponse response = searchByField(field, query, genre, effectiveReleaseDts, effectiveReleaseDte, need, currentStart, sort);
             if (attempt == 0) {
                 rawTotalCount = response.getTotalCount() == null ? 0 : response.getTotalCount();
             }
@@ -309,6 +353,7 @@ public class MovieService {
 
             List<MovieSummaryDto> filtered = toRatedSummaries(rawItems).stream()
                     .filter(movie -> KmdbTextUtils.matchesRuntimeFilter(movie.runtimeMinutes(), runtime))
+                    .filter(movie -> matchesYearFilter(movie.year(), year))
                     .toList();
             skipped += rawItems.size() - filtered.size();
             collected.addAll(filtered);
@@ -320,9 +365,46 @@ public class MovieService {
         }
 
         int totalCount = Math.max(0, rawTotalCount - skipped);
-        // 러닝타임 필터 때는 시도당 넉넉히 받아오다 보니 한 번에 pageSize보다 많이 모일 수 있어 잘라냅니다.
+        // 러닝타임/개봉연도 필터 때는 시도당 넉넉히 받아오다 보니 한 번에 pageSize보다 많이 모일 수 있어 잘라냅니다.
         List<MovieSummaryDto> page = collected.size() > pageSize ? collected.subList(0, pageSize) : collected;
         return new FilledPage(page, totalCount);
+    }
+
+    private boolean matchesYearFilter(Integer movieYear, String yearFilter) {
+        if (yearFilter == null || yearFilter.isBlank()) {
+            return true;
+        }
+        if (YEAR_UNKNOWN_FILTER.equals(yearFilter)) {
+            return movieYear == null;
+        }
+        return movieYear != null && String.valueOf(movieYear).equals(yearFilter);
+    }
+
+    // movie_year_index(MovieCountCacheService의 전체 스캔이 함께 채워둔 색인)에서 이 (장르, 연도)
+    // 조합의 movie_id 순서를 그대로 가져와 movies 캐시에서 요약 정보를 꺼내 붙입니다 - KMDB를 다시
+    // 호출하지 않으므로 연도 하나당 수천 건이 있어도 전부 DB 조회만으로 끝납니다. 러닝타임 필터와
+    // 정렬(이름순/최신순)은 색인 순서만으로는 못 맞추니 이 자리에서 직접 거르고 다시 정렬합니다.
+    private List<MovieSummaryDto> fetchYearIndexedPage(String genre, String year, String runtime, String sort, int page, int pageSize) {
+        String genreKey = genre == null || genre.isBlank() ? "ALL" : genre;
+        List<String> movieIds = movieYearIndexRepository.findByGenreKeyAndYearKeyOrderByDisplayOrderAsc(genreKey, year).stream()
+                .map(MovieYearIndex::getMovieId)
+                .toList();
+        if (movieIds.isEmpty()) {
+            return List.of();
+        }
+
+        Map<String, RatingSummary> ratings = reviewService.getRatingSummaries(movieIds);
+        Map<String, MovieCacheService.MovieSummaryRating> ratingsForCache = ratings.entrySet().stream()
+                .collect(Collectors.toMap(Map.Entry::getKey, e -> new MovieCacheService.MovieSummaryRating(e.getValue().averageScore(), (int) e.getValue().reviewCount())));
+
+        List<MovieSummaryDto> movies = movieCacheService.findCachedSummariesInOrder(movieIds, ratingsForCache).stream()
+                .filter(movie -> KmdbTextUtils.matchesRuntimeFilter(movie.runtimeMinutes(), runtime))
+                .toList();
+        movies = sortMovies(movies, sort);
+
+        int from = Math.min((page - 1) * pageSize, movies.size());
+        int to = Math.min(from + pageSize, movies.size());
+        return movies.subList(from, to);
     }
 
     private List<MovieSummaryDto> toRatedSummaries(List<KmdbMovieItem> items) {

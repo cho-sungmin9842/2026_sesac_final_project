@@ -103,6 +103,8 @@ function MovieDetailPage() {
     setEditingReview(null)
   }
 
+  const hasReviewed = reviews.some((review) => review.userId === user?.id)
+
   const scoredReviews = reviews.filter((review) => typeof review.score === 'number')
   const averageScore =
     scoredReviews.length > 0
@@ -118,11 +120,11 @@ function MovieDetailPage() {
   }
 
   return (
-    <div className="mx-auto max-w-6xl px-6 py-6">
-      <div className="flex gap-6">
+    <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6">
+      <div className="flex flex-col gap-6 sm:flex-row">
         <PosterLink posterUrls={detail.posterUrls} video={detail.video} title={detail.title} />
 
-        <div className="flex-1">
+        <div className="min-w-0 flex-1">
           <h1 className="flex items-baseline gap-2 text-2xl font-bold text-white">
             {detail.title}
             <span className="text-base font-normal text-gray-400">{detail.year}</span>
@@ -161,7 +163,7 @@ function MovieDetailPage() {
 
           <p className="mt-4 max-w-2xl text-sm leading-relaxed text-gray-300">{detail.plot}</p>
 
-          <div className="mt-5 flex gap-3">
+          <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
             <AiSummaryBox movieId={id} movieTitle={detail.title} />
             <button
               type="button"
@@ -200,7 +202,13 @@ function MovieDetailPage() {
             <button
               type="button"
               onClick={() => setDialogOpen(true)}
-              className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-500"
+              disabled={hasReviewed}
+              title={hasReviewed ? '이미 작성한 리뷰가 있습니다. 기존 리뷰를 수정해주세요.' : undefined}
+              className={`rounded-lg px-4 py-2 text-sm font-semibold ${
+                hasReviewed
+                  ? 'cursor-not-allowed bg-slate-700 text-gray-400'
+                  : 'bg-indigo-600 text-white hover:bg-indigo-500'
+              }`}
             >
               리뷰 쓰기
             </button>

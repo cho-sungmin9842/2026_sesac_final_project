@@ -33,7 +33,7 @@ function NowShowingCard({ movie }) {
       <div className="p-3">
         <Link
           to={`/movies/${movie.id}`}
-          className="block truncate text-sm font-semibold text-gray-100 hover:underline"
+          className="block text-sm font-semibold text-gray-100 hover:underline"
         >
           {movie.title}
         </Link>

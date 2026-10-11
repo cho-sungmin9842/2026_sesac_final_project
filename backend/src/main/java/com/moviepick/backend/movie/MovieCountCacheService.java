@@ -4,11 +4,14 @@ import com.moviepick.backend.kmdb.KmdbClient;
 import com.moviepick.backend.kmdb.KmdbTextUtils;
 import com.moviepick.backend.kmdb.dto.KmdbMovieItem;
 import com.moviepick.backend.kmdb.dto.KmdbSearchResponse;
+import com.moviepick.backend.movie.dto.MovieSummaryDto;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -18,18 +21,24 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 /**
- * "전체 영화" 목록의 "N건" 표시용 - 화면에 보이는 개수(nation이 정확히 "대한민국"인 영화만, 러닝타임
- * 필터까지 반영한 값)와 실제로 끝까지 페이지를 넘겼을 때의 건수가 어긋나지 않도록, (장르, 개봉연도,
- * 러닝타임) 조합별 정확한 총 건수를 계산해 캐시해둡니다.
+ * "전체 영화" 목록의 "N건" 표시용 - 화면에 보이는 개수(nation이 정확히 "대한민국"인 영화만, 개봉연도/러닝타임
+ * 필터까지 반영한 값)와 실제로 끝까지 페이지를 넘겼을 때의 건수가 어긋나지 않도록, (장르, 개봉연도, 러닝타임)
+ * 조합별 정확한 총 건수를 계산해 캐시해둡니다.
  * <p>
- * KMDB는 nation 조건에 맞는 "전체" 건수만 알려줄 뿐 그중 몇 건이 해외 공동제작인지, 러닝타임이 얼마인지는
- * 알려주지 않으므로, 정확한 수를 구하려면 그 장르/연도 조합의 전체 카탈로그를 끝까지 훑어야 합니다. 장르/연도
- * 조건이 없는 "전체" 조합은 5만 건이 넘어 KMDB를 100번 넘게 호출해야 하고(실측 결과 수 분~십수 분
+ * 개봉연도는 KMDB의 releaseDts/releaseDte(개봉일자) 파라미터로는 정확히 셀 수 없습니다 - 화면에 보이는
+ * "연도"는 개봉일자가 없으면 제작연도(prodYear)로 대신 표시하는데(MovieMapper.toYear 참고), KMDB 검색
+ * 파라미터는 개봉일자만 볼 뿐 제작연도로의 대체가 없어서, releaseDts/Dte로 연도별로 따로따로 스캔하면
+ * 제작연도로만 표시되는(개봉일자가 없는) 영화들이 전부 빠집니다(2026-10-10 실측: 연도별 합계 9,269건 vs
+ * 실제 전체 52,467건 - 82%가 누락). 그래서 연도는 KMDB에 날짜 제한 없이 장르 하나만 넘겨 카탈로그를 한 번
+ * 훑으면서, 화면과 똑같은 기준(MovieMapper.toYear)으로 모든 연도 구간을 동시에 집계합니다 - 예전처럼 연도
+ * 하나당 스캔을 따로 돌리지 않고 장르 하나당 스캔을 "딱 한 번만" 돌려서 모든 (연도, 러닝타임) 조합을
+ * 한꺼번에 채우므로, 오히려 예전보다 KMDB 호출이 줄어듭니다.
+ * <p>
+ * 장르/연도 조건이 없는 "전체" 조합은 5만 건이 넘어 KMDB를 100번 넘게 호출해야 하고(실측 결과 수 분~십수 분
  * 걸릴 수 있습니다), 이걸 사용자가 페이지를 기다리는 HTTP 요청 안에서 그대로 하면 화면이 그 시간
  * 내내 "불러오는 중"으로 멈춰버립니다. 그래서 계산은 별도 스레드에서 백그라운드로 돌리고, 계산이
  * 끝나기 전까지는 캐시된 값(있으면 오래된 값이라도)이나 호출 쪽이 넘겨준 추정치를 즉시 돌려줍니다 -
- * 계산이 끝나면 다음 요청부터는 정확한 값이 나옵니다. 러닝타임 3종(전체/2시간 미만/2시간 이상)은 어차피
- * 카탈로그를 한 번 훑는 김에 함께 집계되므로, (장르, 연도) 조합 하나당 스캔은 한 번만 돕니다.
+ * 계산이 끝나면 다음 요청부터는 정확한 값이 나옵니다.
  */
 @Slf4j
 @Service
@@ -38,21 +47,41 @@ public class MovieCountCacheService {
     private static final String ALL_KEY = "ALL";
     private static final String RUNTIME_UNDER_KEY = "under120";
     private static final String RUNTIME_OVER_KEY = "over120";
+    private static final String RUNTIME_UNKNOWN_KEY = "unknown";
+    // 개봉일자도 제작연도도 둘 다 없어 연도 자체를 알 수 없는 영화 전용 연도 키 - MovieService의
+    // YEAR_UNKNOWN_FILTER와 같은 값이어야 합니다(화면의 "정보 없음").
+    private static final String YEAR_UNKNOWN_KEY = "unknown";
     // KMDB 카탈로그는 거의 매일 조금씩 늘어나지만, 매번 백그라운드 재계산을 돌리는 건 낭비라 이 정도
     // 유효시간 동안은 캐시된 값을 그대로 보여줍니다.
     private static final long CACHE_TTL_HOURS = 6;
     // KMDB는 한 번에 최대 약 500건까지만 내려줍니다.
     private static final int SCAN_PAGE_SIZE = 500;
 
+    // movie_year_index 저장은 한 번에 너무 큰 배치로 묶지 않도록 끊어서 저장합니다.
+    private static final int INDEX_SAVE_BATCH_SIZE = 1000;
+
     private final KmdbClient kmdbClient;
+    private final MovieMapper movieMapper;
     private final MovieCountCacheRepository repository;
-    // 같은 (장르, 연도) 조합의 백그라운드 재계산이 동시에 여러 번 겹쳐 돌지 않도록 막는 용도입니다.
+    private final MovieCacheService movieCacheService;
+    private final MovieYearIndexRepository movieYearIndexRepository;
+    // 같은 장르의 백그라운드 재계산이 동시에 여러 번 겹쳐 돌지 않도록 막는 용도입니다(이제 연도는 스캔
+    // 자체를 제한하지 않으므로 장르 하나당 스캔도 하나뿐입니다).
     private final ConcurrentHashMap<String, Boolean> scanning = new ConcurrentHashMap<>();
     private final ExecutorService executor = Executors.newFixedThreadPool(2);
 
-    public MovieCountCacheService(KmdbClient kmdbClient, MovieCountCacheRepository repository) {
+    public MovieCountCacheService(
+            KmdbClient kmdbClient,
+            MovieMapper movieMapper,
+            MovieCountCacheRepository repository,
+            MovieCacheService movieCacheService,
+            MovieYearIndexRepository movieYearIndexRepository
+    ) {
         this.kmdbClient = kmdbClient;
+        this.movieMapper = movieMapper;
         this.repository = repository;
+        this.movieCacheService = movieCacheService;
+        this.movieYearIndexRepository = movieYearIndexRepository;
     }
 
     @PreDestroy
@@ -66,9 +95,9 @@ public class MovieCountCacheService {
     }
 
     // genre/year는 "전체"일 때 null(또는 빈 값)로 들어옵니다. runtimeFilter는 null/빈 값("전체") 또는
-    // "under120"/"over120"입니다. fallbackEstimate는 아직 정확한 값을 계산해둔 적이 없을 때(캐시가 전혀
-    // 없을 때) 대신 보여줄 값으로, 호출 쪽(MovieService)이 이미 가지고 있는 "이번 페이지 안에서만 추정한" 값을
-    // 그대로 넘겨받습니다.
+    // "under120"/"over120"/"unknown"입니다. fallbackEstimate는 아직 정확한 값을 계산해둔 적이 없을 때
+    // (캐시가 전혀 없을 때) 대신 보여줄 값으로, 호출 쪽(MovieService)이 이미 가지고 있는 "이번 페이지
+    // 안에서만 추정한" 값을 그대로 넘겨받습니다.
     public int getDomesticTotalCount(String genre, String year, String runtimeFilter, int fallbackEstimate) {
         String genreKey = normalizeKey(genre);
         String yearKey = normalizeKey(year);
@@ -81,8 +110,24 @@ public class MovieCountCacheService {
             return cached.get().getTotalCount();
         }
 
-        triggerBackgroundScan(genre, year, genreKey, yearKey);
+        triggerBackgroundScan(genre, genreKey);
         return cached.map(MovieCountCache::getTotalCount).orElse(fallbackEstimate);
+    }
+
+    // movie_year_index에서 실제 목록을 바로 꺼내 써도 되는지(=이 (장르, 연도) 조합의 전체 스캔이
+    // 최신 상태인지) 확인합니다. getDomesticTotalCount와 달리 여기서는 스캔을 새로 트리거하지 않습니다 -
+    // 호출하는 쪽(MovieService.search)이 totalCount를 구하려고 getDomesticTotalCount를 항상 같이
+    // 부르므로, 트리거는 그쪽에서 이미 일어납니다. runtimeKey는 "ALL"로 고정해서 확인합니다 - 스캔은
+    // 러닝타임과 무관하게 장르 하나당 한 번만 돌고, 그 안에서 모든 러닝타임 구간을 한꺼번에 채우기
+    // 때문입니다(러닝타임 필터는 색인에서 꺼낸 뒤 MovieService가 직접 거릅니다).
+    public boolean hasFreshYearIndex(String genre, String year) {
+        if (year == null || year.isBlank()) {
+            return false;
+        }
+        String genreKey = normalizeKey(genre);
+        return repository.findByGenreKeyAndYearKeyAndRuntimeKey(genreKey, year, ALL_KEY)
+                .map(cache -> cache.getComputedAt().isAfter(LocalDateTime.now().minusHours(CACHE_TTL_HOURS)))
+                .orElse(false);
     }
 
     private String normalizeKey(String value) {
@@ -93,48 +138,71 @@ public class MovieCountCacheService {
         if (runtimeFilter == null || runtimeFilter.isBlank()) {
             return ALL_KEY;
         }
-        return RUNTIME_UNDER_KEY.equals(runtimeFilter) ? RUNTIME_UNDER_KEY : RUNTIME_OVER_KEY;
+        if (RUNTIME_UNDER_KEY.equals(runtimeFilter)) {
+            return RUNTIME_UNDER_KEY;
+        }
+        return RUNTIME_UNKNOWN_KEY.equals(runtimeFilter) ? RUNTIME_UNKNOWN_KEY : RUNTIME_OVER_KEY;
     }
 
-    private void triggerBackgroundScan(String genre, String year, String genreKey, String yearKey) {
-        String scanKey = genreKey + "::" + yearKey;
-        if (scanning.putIfAbsent(scanKey, Boolean.TRUE) != null) {
+    // 연도는 더 이상 스캔 범위를 제한하지 않으므로(날짜 제한 없이 장르 전체를 훑어 모든 연도를 한 번에
+    // 집계), scanKey는 장르만으로 충분합니다.
+    private void triggerBackgroundScan(String genre, String genreKey) {
+        if (scanning.putIfAbsent(genreKey, Boolean.TRUE) != null) {
             return;
         }
         executor.submit(() -> {
             try {
-                Map<String, Integer> counts = scanDomesticTotalCounts(genre, year);
+                ScanResult result = scanDomesticTotalCounts(genre);
                 LocalDateTime now = LocalDateTime.now();
-                counts.forEach((runtimeKey, total) -> {
-                    MovieCountCache row = repository.findByGenreKeyAndYearKeyAndRuntimeKey(genreKey, yearKey, runtimeKey)
-                            .map(existing -> {
-                                existing.update(total, now);
-                                return existing;
-                            })
-                            .orElseGet(() -> new MovieCountCache(genreKey, yearKey, runtimeKey, total, now));
-                    repository.save(row);
-                });
+                result.countsByYear().forEach((yearKey, runtimeCounts) ->
+                        runtimeCounts.forEach((runtimeKey, total) -> {
+                            MovieCountCache row = repository.findByGenreKeyAndYearKeyAndRuntimeKey(genreKey, yearKey, runtimeKey)
+                                    .map(existing -> {
+                                        existing.update(total, now);
+                                        return existing;
+                                    })
+                                    .orElseGet(() -> new MovieCountCache(genreKey, yearKey, runtimeKey, total, now));
+                            repository.save(row);
+                        })
+                );
+
+                // 연도 필터용 색인은 이번 스캔 결과로 통째로 갈아끼웁니다(사이에 빠진 영화가 생기지 않도록
+                // 지우기 전에 새 데이터를 먼저 다 모아둔 뒤, 여기서 한꺼번에 지우고 다시 씁니다).
+                movieYearIndexRepository.deleteByGenreKey(genreKey);
+                for (int i = 0; i < result.indexRows().size(); i += INDEX_SAVE_BATCH_SIZE) {
+                    int end = Math.min(i + INDEX_SAVE_BATCH_SIZE, result.indexRows().size());
+                    movieYearIndexRepository.saveAll(result.indexRows().subList(i, end));
+                }
             } catch (Exception e) {
-                log.error("영화 건수 캐시 계산 중 오류 (genre={}, year={})", genre, year, e);
+                log.error("영화 건수 캐시 계산 중 오류 (genre={})", genre, e);
             } finally {
-                scanning.remove(scanKey);
+                scanning.remove(genreKey);
             }
         });
     }
 
-    // (장르, 연도) 조합의 카탈로그를 한 번 훑으면서 "전체"/"2시간 미만"/"2시간 이상" 세 건수를 동시에 셉니다.
-    private Map<String, Integer> scanDomesticTotalCounts(String genre, String year) {
-        String releaseDts = year == null || year.isBlank() ? null : year + "0101";
-        String releaseDte = year == null || year.isBlank() ? null : year + "1231";
+    private record ScanResult(Map<String, Map<String, Integer>> countsByYear, List<MovieYearIndex> indexRows) {
+    }
 
-        int allCount = 0;
-        int underCount = 0;
-        int overCount = 0;
+    // 이 장르의 카탈로그를 날짜 제한 없이 한 번 훑으면서, 영화마다 화면에 보이는 것과 똑같은 기준
+    // (MovieMapper.toYear - 개봉일자 우선, 없으면 제작연도)으로 연도를 구해 (연도 x 러닝타임) 건수를
+    // 전부 동시에 집계합니다. "ALL" 연도 키는 이 장르의 연도 무관 합계이고, 그 외 키는 "2024"처럼 실제
+    // 연도 문자열이거나(연도를 아예 알 수 없는 극소수 영화는) "unknown"입니다(러닝타임의 "정보 없음"과
+    // 같은 개념 - 화면의 개봉연도 필터 맨 끝 "정보 없음" 항목).
+    // 같은 자리에서 movie_year_index에 넣을 (연도, movie_id) 순서도 함께 모으고, movies 캐시에도
+    // 요약 정보를 페이지 단위로 누적해서, 연도 필터로 실제 목록을 요청할 때 KMDB를 다시 부르지 않고
+    // 이 둘만으로 바로 서빙할 수 있게 합니다.
+    private ScanResult scanDomesticTotalCounts(String genre) {
+        Map<String, Map<String, Integer>> countsByYear = new HashMap<>();
+        List<MovieYearIndex> indexRows = new ArrayList<>();
+        String genreKey = normalizeKey(genre);
         int startCount = 0;
         int rawTotalCount = Integer.MAX_VALUE;
+        int displayOrder = 0;
 
+        // 기본 화면 정렬(최신순)과 색인 순서가 같도록 스캔도 같은 정렬(prodYear desc)로 받아옵니다.
         while (startCount < rawTotalCount) {
-            KmdbSearchResponse response = kmdbClient.searchByTitle("", genre, releaseDts, releaseDte, SCAN_PAGE_SIZE, startCount, null);
+            KmdbSearchResponse response = kmdbClient.searchByTitle("", genre, null, null, SCAN_PAGE_SIZE, startCount, "prodYear,1");
             if (startCount == 0) {
                 rawTotalCount = response.getTotalCount() == null ? 0 : response.getTotalCount();
             }
@@ -142,24 +210,41 @@ public class MovieCountCacheService {
             if (items.isEmpty()) {
                 break;
             }
+            List<MovieSummaryDto> pageSummaries = new ArrayList<>();
             for (KmdbMovieItem item : items) {
                 String title = KmdbTextUtils.cleanTitle(item.getTitle());
                 if (title == null || title.isBlank() || !KmdbTextUtils.isDomesticOnlyNation(item.getNation())) {
                     continue;
                 }
-                allCount++;
-                Integer runtimeMinutes = KmdbTextUtils.parseRuntimeMinutes(item.getRuntime());
-                if (runtimeMinutes == null) {
-                    continue;
-                }
-                if (runtimeMinutes < KmdbTextUtils.RUNTIME_FILTER_THRESHOLD_MINUTES) {
-                    underCount++;
-                } else {
-                    overCount++;
-                }
+                String runtimeKey = runtimeKeyFor(item);
+                tally(countsByYear, ALL_KEY, runtimeKey);
+                pageSummaries.add(movieMapper.toSummary(item));
+
+                Integer year = movieMapper.toYear(item);
+                String yearKey = year != null ? String.valueOf(year) : YEAR_UNKNOWN_KEY;
+                tally(countsByYear, yearKey, runtimeKey);
+                indexRows.add(new MovieYearIndex(genreKey, yearKey, movieMapper.toId(item), displayOrder++));
             }
+            // 평점 조회 없이(스캔 전용) 요약 필드만 movies 캐시에 쌓아, 색인에서 꺼내 쓸 때 KMDB를
+            // 다시 호출할 필요가 없게 합니다. 평점은 서빙 시점에 ReviewService에서 따로 붙입니다.
+            movieCacheService.upsertSummaries(pageSummaries);
             startCount += items.size();
         }
-        return Map.of(ALL_KEY, allCount, RUNTIME_UNDER_KEY, underCount, RUNTIME_OVER_KEY, overCount);
+        return new ScanResult(countsByYear, indexRows);
+    }
+
+    private String runtimeKeyFor(KmdbMovieItem item) {
+        Integer runtimeMinutes = KmdbTextUtils.parseRuntimeMinutes(item.getRuntime());
+        if (runtimeMinutes == null) {
+            return RUNTIME_UNKNOWN_KEY;
+        }
+        return runtimeMinutes < KmdbTextUtils.RUNTIME_FILTER_THRESHOLD_MINUTES ? RUNTIME_UNDER_KEY : RUNTIME_OVER_KEY;
+    }
+
+    // yearKey(ALL 또는 특정 연도)에 해당 영화 1건을 "그 연도 전체"와 "그 연도 + 이 러닝타임 구간" 양쪽에 더합니다.
+    private void tally(Map<String, Map<String, Integer>> countsByYear, String yearKey, String runtimeKey) {
+        Map<String, Integer> runtimeCounts = countsByYear.computeIfAbsent(yearKey, k -> new HashMap<>());
+        runtimeCounts.merge(ALL_KEY, 1, Integer::sum);
+        runtimeCounts.merge(runtimeKey, 1, Integer::sum);
     }
 }

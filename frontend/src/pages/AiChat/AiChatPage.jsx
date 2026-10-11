@@ -7,19 +7,14 @@ import ChatMovieRecommendation from './components/ChatMovieRecommendation'
 import ChatConversationSidebar from './components/ChatConversationSidebar'
 import ChatSeatStatus from './components/ChatSeatStatus'
 
+// "지금 상영중인지"는 서버가 자기 시계로(LocalDate.now()) 판단하므로, 문구에 날짜를 직접
+// 적어 보낼 필요가 없습니다 - 화면에 보이는 문구 그대로 보냅니다.
 const QUICK_REPLIES = [
+  '지금 상영중인 영화를 찾아줘',
   '같은 장르의 영화들을 추천해줘',
   '이번 주말에 볼만한 영화 추천해줘',
   '이 영화 찜해줘',
 ]
-
-function formatToday() {
-  const date = new Date()
-  const yyyy = date.getFullYear()
-  const mm = String(date.getMonth() + 1).padStart(2, '0')
-  const dd = String(date.getDate()).padStart(2, '0')
-  return `${yyyy}.${mm}.${dd}`
-}
 
 const GREETING = { id: 0, from: 'ai', type: 'text', content: '안녕하세요! 저는 새싹무비 AI 큐레이터예요 🎬 오늘 어떤 영화를 찾아드릴까요?' }
 
@@ -68,15 +63,6 @@ function AiChatPage() {
   // sendMessage가 새로 만들어진 conversationId를 activeConversationId에 반영할 때, 그 대화의 메시지는
   // 이미 화면에 다 있으므로 바로 아래 effect가 서버에서 또 불러오지 않도록 막는 플래그입니다.
   const skipNextFetchRef = useRef(false)
-
-  // 접속 시점의 실제 날짜를 그때그때 반영해야 하니, 고정 배열이 아니라 렌더링마다 새로 만듭니다.
-  // 화면에는 짧게 "오늘 상영중인 영화를 찾아줘"라고 보여주되, 실제로 서버에 보내는 메시지는 그대로
-  // "오늘(YYYY.MM.DD 기준) 상영중인 영화를 찾아줘"입니다 - 버튼 문구만 간결하게 바꾸고 동작(채팅 내용,
-  // 백엔드 처리)은 기존과 똑같이 유지하기 위해 화면 표시(label)와 실제 전송 내용(message)을 분리했습니다.
-  const quickReplies = [
-    { label: '오늘 상영중인 영화를 찾아줘', message: `오늘(${formatToday()} 기준) 상영중인 영화를 찾아줘` },
-    ...QUICK_REPLIES.map((text) => ({ label: text, message: text })),
-  ]
 
   // 대화방 목록을 불러와서, 지난 대화가 있으면 가장 최근 대화를 이어서 보여주고(원래 하던 대로 "이어서
   // 계속하기"), 하나도 없는 완전히 새 사용자일 때만 인사말을 보여줍니다.
@@ -289,15 +275,15 @@ function AiChatPage() {
         </div>
 
         <div className="mb-3 flex flex-wrap gap-2">
-          {quickReplies.map(({ label, message }) => (
+          {QUICK_REPLIES.map((text) => (
             <button
-              key={message}
+              key={text}
               type="button"
               disabled={isSending}
-              onClick={() => sendMessage(message)}
+              onClick={() => sendMessage(text)}
               className="rounded-full border border-gray-700 px-3 py-1.5 text-xs text-gray-300 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
             >
-              {label}
+              {text}
             </button>
           ))}
         </div>

@@ -2,6 +2,7 @@ package com.moviepick.backend.auth;
 
 import com.moviepick.backend.auth.dto.LoginRequest;
 import com.moviepick.backend.auth.dto.ResetPasswordRequest;
+import com.moviepick.backend.auth.dto.ResetPasswordResponse;
 import com.moviepick.backend.auth.dto.SignupRequest;
 import com.moviepick.backend.auth.dto.SocialLoginRequest;
 import com.moviepick.backend.auth.dto.UserDto;
@@ -37,7 +38,7 @@ public class AuthController {
     }
 
     @PostMapping("/reset-password")
-    public void resetPassword(@Valid @RequestBody ResetPasswordRequest request) {
-        authService.resetPassword(request);
+    public ResetPasswordResponse resetPassword(@Valid @RequestBody ResetPasswordRequest request) {
+        return authService.resetPassword(request);
     }
 }

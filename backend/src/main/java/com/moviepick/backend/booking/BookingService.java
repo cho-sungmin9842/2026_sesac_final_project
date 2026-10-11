@@ -66,7 +66,13 @@ public class BookingService {
 
     // 좌석 예약 생성과 좌석 상태 갱신이 한 트랜잭션 안에서 함께 성공/실패해야 하고, Screening의 theater는
     // 지연 로딩(open-in-view: false)이라 같은 트랜잭션 안에서 읽어야 합니다.
-    @Transactional
+    // noRollbackFor: AI 채팅(ChatService.handleBookingRequest)이 이 메서드를 같은 트랜잭션 안에서 호출하고
+    // ApiException을 직접 잡아 대화형 안내 문구로 바꿔 계속 진행하는데, 기본 설정대로면 이 메서드가
+    // 참여(REQUIRED)하는 바깥 트랜잭션이 "rollback-only"로 표시되어 버려(이미 잡아서 처리했는데도) 이후
+    // 커밋 시점에 UnexpectedRollbackException이 터지는 문제가 있었습니다(2026-10-11 실측 - 이미 예약된
+    // 좌석을 다시 예매하면 500 에러). 이 메서드의 ApiException은 전부 실제 DB 변경(좌석/예매 저장) 전에만
+    // 던져지므로(검증 실패), 롤백 대상으로 표시하지 않아도 데이터 정합성에 영향이 없습니다.
+    @Transactional(noRollbackFor = ApiException.class)
     public BookingDto create(Long userId, BookingRequest request) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new ApiException("로그인이 필요합니다.", HttpStatus.UNAUTHORIZED));
@@ -177,7 +183,12 @@ public class BookingService {
     // 마이페이지 좌석 배치도 다이얼로그 - 내 예매에 포함된 좌석 하나를 아직 비어있는 다른 좌석으로
     // 바꿉니다. 인원 구분(성인/청소년/어린이/우대)과 요금은 그대로 유지됩니다(좌석 위치가 아니라
     // 인원 구분에 따라 결정되므로, 관람가 재검증도 필요 없습니다).
-    @Transactional
+    // noRollbackFor: AI 채팅(ChatService)도 같은 트랜잭션 안에서 이 메서드를 호출하고 ApiException을
+    // 직접 잡아 안내 문구로 바꿔 계속 진행하는데, 기본 설정대로면 참여(REQUIRED) 트랜잭션이
+    // rollback-only로 표시돼버려 커밋 시점에 UnexpectedRollbackException이 나는 문제가 있었습니다
+    // (create()에서 2026-10-11에 겪은 것과 같은 함정). 이 메서드의 ApiException도 전부 실제 DB 변경
+    // 전에만 던져지므로 안전합니다.
+    @Transactional(noRollbackFor = ApiException.class)
     public BookingDto changeSeat(Long userId, Long bookingId, SeatChangeRequest request) {
         Booking booking = bookingRepository.findById(bookingId)
                 .orElseThrow(() -> new ApiException("예매 내역을 찾을 수 없습니다: " + bookingId, HttpStatus.NOT_FOUND));
@@ -187,7 +198,7 @@ public class BookingService {
 
         Screening screening = screeningRepository.findById(booking.getScreeningId())
                 .orElseThrow(() -> new ApiException("상영정보를 찾을 수 없습니다: " + booking.getScreeningId(), HttpStatus.NOT_FOUND));
-        validateBookingCutoff(screening);
+        validateBookingCutoff(screening, "좌석을 변경");
 
         if (request.fromSeatId().equals(request.toSeatId())) {
             throw new ApiException("같은 좌석으로는 변경할 수 없습니다.", HttpStatus.BAD_REQUEST);
@@ -224,7 +235,62 @@ public class BookingService {
         Movie movie = movieRepository.findById(screening.getMovieId()).orElse(null);
         List<Seat> bookingSeats = seatRepository.findAllById(
                 booking.getSeats().stream().map(BookingSeat::getSeatId).toList());
-        return toDto(booking, screening, bookingSeats, movie);
+        BookingDto dto = toDto(booking, screening, bookingSeats, movie);
+        notificationService.notifySeatChanged(booking.getUser(), booking.getId(), bookingSummary(dto));
+        return dto;
+    }
+
+    // 마이페이지 "예매 내역" 탭의 "예매 취소" - 아직 상영이 시작되지 않은 예매만 취소할 수 있고, 취소하면
+    // 걸려있던 좌석을 전부 다시 AVAILABLE로 되돌립니다(안 그러면 취소한 예매의 좌석이 영구히 BOOKED로
+    // 남아 아무도 다시 예매할 수 없게 됩니다).
+    // noRollbackFor: changeSeat()와 같은 이유로, AI 채팅이 이 메서드의 ApiException을 잡아 계속 진행해도
+    // 바깥 트랜잭션이 rollback-only로 표시되지 않게 합니다(이 메서드의 ApiException도 전부 실제 DB
+    // 변경 전에만 던져집니다).
+    @Transactional(noRollbackFor = ApiException.class)
+    public void cancel(Long userId, Long bookingId) {
+        Booking booking = bookingRepository.findById(bookingId)
+                .orElseThrow(() -> new ApiException("예매 내역을 찾을 수 없습니다: " + bookingId, HttpStatus.NOT_FOUND));
+        if (!booking.getUser().getId().equals(userId)) {
+            throw new ApiException("본인의 예매만 취소할 수 있습니다.", HttpStatus.FORBIDDEN);
+        }
+
+        Screening screening = screeningRepository.findById(booking.getScreeningId())
+                .orElseThrow(() -> new ApiException("상영정보를 찾을 수 없습니다: " + booking.getScreeningId(), HttpStatus.NOT_FOUND));
+        // 좌석변경과 같은 기준(상영 시작 30분 전까지만)으로 취소도 막습니다 - 임박한 회차를 막판에 취소하면
+        // 그 좌석이 다시 풀려도 사실상 아무도 새로 예매할 시간이 없어, 예매 생성/좌석변경과 동일하게 다룹니다.
+        validateBookingCutoff(screening, "취소");
+
+        // 알림 문구에 쓸 요약은 예매가 지워지기 전에 미리 만들어둡니다.
+        Movie movie = movieRepository.findById(screening.getMovieId()).orElse(null);
+        List<Seat> bookingSeats = seatRepository.findAllById(
+                booking.getSeats().stream().map(BookingSeat::getSeatId).toList());
+        BookingDto dto = toDto(booking, screening, bookingSeats, movie);
+
+        releaseSeats(booking);
+        bookingRepository.delete(booking);
+        notificationService.notifyBookingCancelled(booking.getUser(), bookingSummary(dto));
+    }
+
+    // 회원 탈퇴 시 UserService가 사용자 행을 지우기 "전에" 호출합니다. 좌석만 풀어주고 예매 행을 세션에
+    // 그대로 남겨둔 채 뒤이어 User를 지우면 Hibernate가 flush 시점에 "본인(User)을 참조하는 managed
+    // Booking이 아직 남아있다"고 보고 TransientObjectException을 던집니다 - 그래서 cancel()과 똑같이
+    // 좌석을 돌려놓은 뒤 예매 자체도 바로 지워서, User를 지울 때는 그 사용자의 Booking이 세션에 하나도
+    // 남아있지 않게 합니다(탈퇴라 상영이 이미 끝났는지는 가리지 않습니다).
+    @Transactional
+    public void releaseAllSeatsForUser(Long userId) {
+        List<Booking> bookings = bookingRepository.findByUserIdOrderByCreatedAtDesc(userId);
+        bookings.forEach(this::releaseSeats);
+        bookingRepository.deleteAll(bookings);
+    }
+
+    private void releaseSeats(Booking booking) {
+        List<Long> seatIds = booking.getSeats().stream().map(BookingSeat::getSeatId).toList();
+        if (seatIds.isEmpty()) {
+            return;
+        }
+        List<Seat> seats = seatRepository.findAllById(seatIds);
+        seats.forEach(Seat::markAvailable);
+        seatRepository.saveAll(seats);
     }
 
     // 알림 문구에 쓰는 "영화명 상영관 날짜 시간 · 좌석 N석" 요약.
@@ -235,9 +301,15 @@ public class BookingService {
 
     // 상영 시작 30분 전이 지났으면(이미 시작했거나 임박한 회차) 예매를 막습니다.
     private void validateBookingCutoff(Screening screening) {
+        validateBookingCutoff(screening, "예매");
+    }
+
+    // 예매 생성뿐 아니라 취소/좌석변경도 똑같이 상영 시작 30분 전까지만 가능합니다 - action은 에러 문구에
+    // 쓰이는 동사("예매"/"취소"/"좌석을 변경")입니다.
+    private void validateBookingCutoff(Screening screening, String action) {
         LocalDateTime showDateTime = LocalDateTime.of(screening.getDate(), screening.getStartTime());
         if (showDateTime.isBefore(LocalDateTime.now().plusMinutes(BOOKING_CUTOFF_MINUTES))) {
-            throw new ApiException("상영 시작 " + BOOKING_CUTOFF_MINUTES + "분 전까지만 예매할 수 있습니다.", HttpStatus.BAD_REQUEST);
+            throw new ApiException("상영 시작 " + BOOKING_CUTOFF_MINUTES + "분 전까지만 " + action + "할 수 있습니다.", HttpStatus.BAD_REQUEST);
         }
     }
 
