@@ -3,6 +3,12 @@ import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../auth/AuthContext'
 import AuthShell from './components/AuthShell'
 
+// 아이디: 영문+숫자 조합만(한글/공백/특수문자 불가, 영문과 숫자 둘 다 포함).
+const USERNAME_PATTERN = /^(?=.*[A-Za-z])(?=.*\d)[A-Za-z0-9]+$/
+// 비밀번호: 8자 이상, 영문+숫자 조합 또는 영문+숫자+특수문자 조합만(영문·숫자는 필수, 특수문자는 선택,
+// 공백/한글 불가) - 백엔드 SignupRequest의 @Pattern과 동일한 규칙입니다.
+const PASSWORD_PATTERN = /^(?=.*[A-Za-z])(?=.*\d)[A-Za-z0-9!@#$%^&*()_+\-=[\]{}:;,.<>/?~]{8,}$/
+
 function SignupPage() {
   const { signup } = useAuth()
   const navigate = useNavigate()
@@ -31,6 +37,14 @@ function SignupPage() {
       return
     }
 
+    if (!USERNAME_PATTERN.test(username.trim())) {
+      setError('아이디는 영문과 숫자 조합만 가능합니다.')
+      return
+    }
+    if (!PASSWORD_PATTERN.test(password)) {
+      setError('비밀번호는 영문과 숫자를 포함해 8자 이상, 영문+숫자 또는 영문+숫자+특수문자 조합만 가능합니다.')
+      return
+    }
     if (password !== passwordConfirm) {
       setError('비밀번호가 서로 일치하지 않습니다.')
       return
@@ -96,7 +110,7 @@ function SignupPage() {
             required
             value={username}
             onChange={(event) => setUsername(event.target.value)}
-            placeholder="아이디를 입력하세요"
+            placeholder="영문, 숫자 조합"
             className={inputClassName(usernameHasError)}
           />
         </div>
@@ -111,7 +125,7 @@ function SignupPage() {
             required
             value={password}
             onChange={(event) => setPassword(event.target.value)}
-            placeholder="4자 이상 입력해주세요"
+            placeholder="영문, 숫자 포함 8자 이상(특수문자 가능)"
             className={inputClassName(passwordHasError)}
           />
         </div>

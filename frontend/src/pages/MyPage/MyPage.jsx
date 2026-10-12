@@ -18,7 +18,7 @@ import BookingSeatMapDialog from './components/BookingSeatMapDialog'
 import ChangePasswordDialog from './components/ChangePasswordDialog'
 import DeleteAccountDialog from './components/DeleteAccountDialog'
 
-const TABS = ['예매 내역', '찜한 영화', '시청완료', '내가 쓴 리뷰']
+const TABS = ['예매 내역', '내가 쓴 리뷰', '찜한 영화', '시청완료']
 
 function formatJoinedAt(createdAt) {
   if (!createdAt) return '-'

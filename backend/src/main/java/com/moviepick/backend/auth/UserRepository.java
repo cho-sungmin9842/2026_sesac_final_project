@@ -11,6 +11,8 @@ public interface UserRepository extends JpaRepository<User, Long> {
 
     boolean existsByUsername(String username);
 
+    boolean existsByNickname(String nickname);
+
     // 예매 완료 알림을 전원에게 보낼 관리자 목록.
     List<User> findByAdminTrue();
 

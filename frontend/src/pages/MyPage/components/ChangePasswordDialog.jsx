@@ -1,5 +1,8 @@
 import { useState } from 'react'
 
+// 회원가입과 동일한 규칙: 8자 이상, 영문+숫자 조합 또는 영문+숫자+특수문자 조합만(공백/한글 불가).
+const PASSWORD_PATTERN = /^(?=.*[A-Za-z])(?=.*\d)[A-Za-z0-9!@#$%^&*()_+\-=[\]{}:;,.<>/?~]{8,}$/
+
 function ChangePasswordDialog({ onClose, onSubmit }) {
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
@@ -11,6 +14,10 @@ function ChangePasswordDialog({ onClose, onSubmit }) {
   const handleSubmit = async (event) => {
     event.preventDefault()
     setError('')
+    if (!PASSWORD_PATTERN.test(newPassword)) {
+      setError('비밀번호는 영문과 숫자를 포함해 8자 이상, 영문+숫자 또는 영문+숫자+특수문자 조합만 가능합니다.')
+      return
+    }
     if (newPassword !== confirmPassword) {
       setError('새 비밀번호가 서로 일치하지 않습니다.')
       return
@@ -60,6 +67,7 @@ function ChangePasswordDialog({ onClose, onSubmit }) {
                 required
                 value={newPassword}
                 onChange={(event) => setNewPassword(event.target.value)}
+                placeholder="영문, 숫자 포함 8자 이상(특수문자 가능)"
                 className="w-full rounded-lg bg-slate-800 px-3 py-2 text-sm text-white focus:outline-none"
               />
             </div>

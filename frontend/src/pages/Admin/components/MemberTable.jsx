@@ -38,9 +38,10 @@ function MemberTable({ members }) {
                 )}
               </td>
               <td className="py-4 whitespace-nowrap text-gray-400">{formatDate(member.createdAt)}</td>
-              <td className="py-4 text-gray-300">{member.reviewCount}건</td>
-              <td className="py-4 text-gray-300">{member.bookingCount}건</td>
-              <td className="py-4 text-gray-300">{member.wishlistCount}편</td>
+              {/* 관리자는 리뷰 작성/예매/찜을 하지 않는 계정이라, 활동 집계 대신 "-"로 표시합니다. */}
+              <td className="py-4 text-gray-300">{member.isAdmin ? '-' : `${member.reviewCount}건`}</td>
+              <td className="py-4 text-gray-300">{member.isAdmin ? '-' : `${member.bookingCount}건`}</td>
+              <td className="py-4 text-gray-300">{member.isAdmin ? '-' : `${member.wishlistCount}편`}</td>
             </tr>
           ))}
         </tbody>

@@ -33,7 +33,9 @@ function BookingListPage() {
 
   return (
     <div className="mx-auto max-w-5xl px-6 py-6">
-      <h1 className="text-xl font-bold text-gray-100">현재 상영중인 영화({formatToday()} 기준)</h1>
+      <h1 className="text-xl font-bold text-gray-100">
+        현재 상영중인 영화({formatToday()} 기준){status === 'ready' && ` (${movies.length}건)`}
+      </h1>
       <p className="mt-1 text-sm text-gray-400">예매할 영화를 선택해주세요.</p>
 
       {status === 'loading' && <p className="mt-6 text-gray-400">KMDB에서 상영중인 영화를 불러오는 중...</p>}

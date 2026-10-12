@@ -57,7 +57,7 @@ public class ScreeningGenerationService {
     // 루트의 "상영정보" 폴더) - 개발 중 생성 결과를 빠르게 확인하기 위한 용도라 이 프로젝트 전용 경로를
     // 그대로 씁니다.
     private static final String SCREENING_REPORT_DIR =
-            "C:\\2026_sesac_innogrid_cloud\\final-project\\2026_sesac_final_project\\상영정보";
+            "C:\\2026_SeSac_inno_cloud\\final-project\\ai-movie-service\\상영정보";
     private static final DateTimeFormatter REPORT_DATE_FORMAT = DateTimeFormatter.ofPattern("yyyy.MM.dd");
     private static final DateTimeFormatter REPORT_ROW_DATE_FORMAT = DateTimeFormatter.ofPattern("MM.dd");
     private static final DateTimeFormatter REPORT_TIME_FORMAT = DateTimeFormatter.ofPattern("HH:mm");

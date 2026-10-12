@@ -29,15 +29,19 @@ public class AuthService {
     public UserDto signup(SignupRequest request) {
         String username = normalizeUsername(request.username());
         if (isAdminUsername(username)) {
-            throw new ApiException("'admin'으로 시작하는 아이디는 사용할 수 없습니다.", HttpStatus.BAD_REQUEST);
+            throw new ApiException("admin은 관리자 계정입니다.", HttpStatus.BAD_REQUEST);
         }
         if (userRepository.existsByUsername(username)) {
             throw new ApiException("이미 가입된 아이디입니다: " + username, HttpStatus.CONFLICT);
         }
+        String nickname = request.nickname().trim();
+        if (userRepository.existsByNickname(nickname)) {
+            throw new ApiException("이미 사용중인 닉네임입니다: " + nickname, HttpStatus.CONFLICT);
+        }
         User user = new User(
                 username,
                 passwordEncoder.encode(request.password()),
-                request.nickname().trim(),
+                nickname,
                 false
         );
         return UserDto.from(userRepository.save(user));

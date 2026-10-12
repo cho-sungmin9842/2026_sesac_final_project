@@ -19,7 +19,8 @@ CREATE TABLE IF NOT EXISTS users (
     nickname      VARCHAR(100) NOT NULL,
     is_admin      BOOLEAN      NOT NULL DEFAULT FALSE,
     created_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT uq_users_username UNIQUE (username)
+    CONSTRAINT uq_users_username UNIQUE (username),
+    CONSTRAINT uq_users_nickname UNIQUE (nickname)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
 
 -- 기본 관리자 계정(아이디=admin, 비밀번호=admin1234). password_hash는 BCryptPasswordEncoder로 미리 해시해둔
