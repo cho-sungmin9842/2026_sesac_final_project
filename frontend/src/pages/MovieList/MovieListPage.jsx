@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import MovieCard from '../../components/common/MovieCard'
 import { searchMovies } from '../../api/movieApi'
@@ -44,12 +44,28 @@ function MovieListPage() {
     })
   }
 
-  // 홈 화면 "전체보기"처럼 스크롤이 내려간 상태에서 이 페이지로 들어올 때, 이전 스크롤 위치가 그대로
-  // 남아있어 화면 중간부터 보이는 문제가 있어 항상 맨 위에서 시작하도록 맞춥니다. searchParams가 바뀌면
-  // (예: 다른 장르로 "전체보기"를 다시 눌렀을 때) 다시 떠도 맨 위로 이동합니다.
+  // 검색어/쿼리스트링이 바뀔 때 맨 위로 스크롤하는 건 App.jsx의 전역 ScrollToTop이 처리합니다(쿼리스트링
+  // 변경도 감지합니다). 장르/연도/러닝타임 사이드바 필터는 URL에 안 실리는 순수 로컬 상태라 전역
+  // ScrollToTop이 못 보므로, 그건 아래 filters 전용 effect가 따로 처리합니다.
+
+  // 헤더 검색창은 이 페이지를 벗어나지 않고(라우트가 같아 컴포넌트가 다시 마운트되지 않음) query/field만
+  // 바꿔서 새 검색을 겁니다. 그런데 사이드바에서 장르/연도/러닝타임을 "전체"가 아닌 값으로 골라둔 채로
+  // 새로 검색하면, filters state가 그대로 남아있어 사이드바는 옛 선택 그대로 보이고 결과도 그 옛 조건과
+  // 함께 걸러져 나왔습니다 - 새로 검색할 땐 장르/연도/러닝타임을 전체로 리셋하고 그 조건으로 다시 걸러야
+  // 합니다(2026-10-14 요청). query/field가 실제로 바뀐 경우에만 리셋해야 하므로("처음 한 번만 건너뛰기"
+  // 식의 boolean 플래그는 개발 모드 StrictMode가 마운트 직후 effect를 한 번 더 재실행할 때 "이미 건너뛴
+  // 상태"로 착각해 곧바로 리셋을 실행해버리는 버그가 있었습니다 - 2026-10-14 실측, 홈 화면 "전체보기"로
+  // 들어오자마자 장르 선택이 바로 풀려버림) 직전에 본 query/field 값을 ref로 기억해두고, 그 값과 실제로
+  // 달라졌을 때만 리셋합니다.
+  const previousSearchKeyRef = useRef(`${query}|${field}`)
   useEffect(() => {
-    window.scrollTo(0, 0)
-  }, [searchParams.toString()])
+    const searchKey = `${query}|${field}`
+    if (previousSearchKeyRef.current === searchKey) {
+      return
+    }
+    previousSearchKeyRef.current = searchKey
+    setFilters({ genres: [], year: '전체', runtime: '전체' })
+  }, [query, field])
 
   // 검색어/검색대상/장르/연도/러닝타임/정렬이 바뀌면 1페이지부터 다시 봅니다.
   useEffect(() => {

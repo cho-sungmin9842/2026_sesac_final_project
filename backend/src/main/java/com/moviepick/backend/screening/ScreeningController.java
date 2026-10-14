@@ -5,10 +5,13 @@ import com.moviepick.backend.common.ApiException;
 import com.moviepick.backend.screening.dto.ScreeningDto;
 import com.moviepick.backend.screening.dto.SeatDto;
 import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
@@ -21,13 +24,16 @@ public class ScreeningController {
     private final ScreeningRepository screeningRepository;
     private final SeatRepository seatRepository;
     private final BookingRepository bookingRepository;
+    private final SeatHoldService seatHoldService;
 
     public ScreeningController(
-            ScreeningRepository screeningRepository, SeatRepository seatRepository, BookingRepository bookingRepository
+            ScreeningRepository screeningRepository, SeatRepository seatRepository, BookingRepository bookingRepository,
+            SeatHoldService seatHoldService
     ) {
         this.screeningRepository = screeningRepository;
         this.seatRepository = seatRepository;
         this.bookingRepository = bookingRepository;
+        this.seatHoldService = seatHoldService;
     }
 
     /**
@@ -58,8 +64,33 @@ public class ScreeningController {
         }
         Map<Long, Long> seatOwnerUserId = viewerUserId == null ? Map.of() : seatOwnerUserId(id);
         return seatRepository.findByScreeningIdOrderByRowLabelAscColNoAsc(id).stream()
-                .map(seat -> SeatDto.from(seat, viewerUserId != null && viewerUserId.equals(seatOwnerUserId.get(seat.getId()))))
+                .map(seat -> SeatDto.from(
+                        seat, viewerUserId, viewerUserId != null && viewerUserId.equals(seatOwnerUserId.get(seat.getId()))))
                 .toList();
+    }
+
+    /**
+     * 예매 화면/마이페이지 좌석변경 다이얼로그에서 좌석을 "선택"하는 순간 임시로 선점합니다(TTL
+     * SeatHoldService.HOLD_TTL_MINUTES분) - 다른 사용자 화면에는 바로 "선택 중"으로 보이고 클릭도
+     * 막혀서, 결제 직전에야 충돌이 드러나던 문제를 막습니다.
+     */
+    @PostMapping("/api/screenings/{screeningId}/seats/{seatId}/hold")
+    public SeatDto holdSeat(
+            @PathVariable Long screeningId, @PathVariable Long seatId, @RequestHeader("X-User-Id") Long userId
+    ) {
+        return seatHoldService.hold(screeningId, seatId, userId);
+    }
+
+    /**
+     * 좌석 선택을 해제하거나 화면을 벗어날 때 호출하는 best-effort 해제입니다 - 내가 선점한 좌석이
+     * 아니면(이미 해제/만료/다른 사람 것) 조용히 아무 일도 하지 않습니다.
+     */
+    @DeleteMapping("/api/screenings/{screeningId}/seats/{seatId}/hold")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void releaseSeatHold(
+            @PathVariable Long screeningId, @PathVariable Long seatId, @RequestHeader("X-User-Id") Long userId
+    ) {
+        seatHoldService.release(screeningId, seatId, userId);
     }
 
     // 이 상영의 예매들을 모아 "좌석 id -> 예매한 사용자 id" 맵을 만듭니다.

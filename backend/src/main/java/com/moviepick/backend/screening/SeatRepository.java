@@ -3,9 +3,11 @@ package com.moviepick.backend.screening;
 import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -24,4 +26,12 @@ public interface SeatRepository extends JpaRepository<Seat, Long> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select s from Seat s where s.id in :ids")
     List<Seat> findAllByIdForUpdate(@Param("ids") List<Long> ids);
+
+    // 좌석 선점(HOLD)은 Seat.effectiveStatus()의 지연 만료 판정으로 이미 정확성이 보장되므로, 이 배치는
+    // DB에 남는 stale HELD 행을 주기적으로 치워주는 위생 목적일 뿐입니다(SeatHoldCleanupService).
+    @Modifying(clearAutomatically = true)
+    @Query("update Seat s set s.status = com.moviepick.backend.screening.SeatStatus.AVAILABLE, "
+            + "s.heldByUserId = null, s.heldUntil = null "
+            + "where s.status = com.moviepick.backend.screening.SeatStatus.HELD and s.heldUntil < :now")
+    int releaseExpiredHolds(@Param("now") LocalDateTime now);
 }

@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom'
 import MovieCard from '../../../components/common/MovieCard'
 
-function MovieSection({ icon, title, movies, viewAllTo = '/movies' }) {
+function MovieSection({ icon, title, movies, viewAllTo = '/movies', viewAllLabel = '전체보기' }) {
   return (
     <section className="mt-8">
       <div className="mb-3 flex items-center justify-between">
@@ -10,7 +10,7 @@ function MovieSection({ icon, title, movies, viewAllTo = '/movies' }) {
           {title}
         </h3>
         <Link to={viewAllTo} className="text-sm text-gray-400 hover:text-white">
-          전체보기
+          {viewAllLabel}
         </Link>
       </div>
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7">

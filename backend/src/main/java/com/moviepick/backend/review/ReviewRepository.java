@@ -14,8 +14,12 @@ public interface ReviewRepository extends JpaRepository<Review, Long> {
     // 관리자 "리뷰 신고 관리" 화면 - 특정 영화/사용자로 좁히지 않고 DB에 저장된 모든 사용자의 리뷰를 보여줍니다.
     List<Review> findAllByOrderByCreatedAtDesc();
 
-    // 마이페이지 "내가 쓴 리뷰" 탭 - 영화 구분 없이 이 사용자가 쓴 모든 리뷰.
-    List<Review> findByUserIdOrderByCreatedAtDesc(Long userId);
+    // 마이페이지 "내가 쓴 리뷰" 탭 - 영화 구분 없이 이 사용자가 쓴 모든 리뷰. created_at은 초 단위
+    // (DATETIME)라 리뷰 두 개가 같은 초에 쓰이면 동점이 나고, 그 경우 MySQL이 삽입 순서를 보장해주지
+    // 않아 "가장 최근 리뷰"(AI 채팅의 targetMostRecent)가 실제로는 더 오래된 리뷰를 가리키는 문제가
+    // 있었습니다(2026-10-14 실측 - chat_messages에서 겪었던 것과 같은 패턴). id가 auto_increment라
+    // 삽입 순서를 항상 정확히 반영하므로 2차 정렬 기준으로 씁니다.
+    List<Review> findByUserIdOrderByCreatedAtDescIdDesc(Long userId);
 
     // 한 사용자가 같은 영화에 리뷰를 두 번 쓰지 못하게 막는 용도(프론트의 "리뷰 쓰기" 버튼 비활성화와
     // 같은 규칙을 서버에서도 강제 - AI 채팅처럼 그 버튼을 거치지 않는 경로로도 중복 작성되지 않도록).

@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useAuth } from '../../auth/AuthContext'
 import { getMovieDetail } from '../../api/movieApi'
-import { getScreenings, getScreeningSeats } from '../../api/screeningApi'
+import { getScreenings, getScreeningSeats, holdSeat, releaseSeatHold } from '../../api/screeningApi'
 import { createBooking } from '../../api/bookingApi'
 import PosterPlaceholder from '../../components/common/PosterPlaceholder'
 import ConfirmDialog from '../../components/common/ConfirmDialog'
@@ -15,6 +15,7 @@ import {
   getDisallowedCategories,
   isWeekendOrHoliday,
   priceFor,
+  requiresTeenAgeWarning,
   timePeriodFor,
 } from './bookingData'
 
@@ -39,6 +40,11 @@ function isBookable(screening) {
   const cutoff = new Date(Date.now() + BOOKING_CUTOFF_MINUTES * 60 * 1000)
   return startDateTime >= cutoff
 }
+
+// 좌석 선택을 "선점(hold)"으로 서버에 반영한 뒤, 다른 사용자의 선택/예매도 바로 반영되도록 주기적으로
+// 좌석맵을 다시 불러오고(그 사이 내가 선택한 좌석의 TTL도 같이 갱신) - NotificationBell.jsx의 폴링
+// 패턴을 그대로 따릅니다.
+const SEAT_POLL_INTERVAL_MS = 5000
 
 function PillButton({ active, onClick, children }) {
   return (
@@ -68,16 +74,24 @@ function BookingSeatPage() {
   const [selectedSeats, setSelectedSeats] = useState([])
   const [ticketCounts, setTicketCounts] = useState({ adult: 0, teen: 0, child: 0, senior: 0 })
   const [showPaymentWidget, setShowPaymentWidget] = useState(false)
+  // 결제 요청이 진행 중인 동안은 좌석맵 폴링이 선택 좌석을 "정리"(reconcile)하지 않도록 막는 플래그 -
+  // 응답을 기다리는 사이에 늦게 도착한 폴링 결과 때문에 제출 중인 좌석이 선택 해제되는 걸 방지합니다.
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  // setInterval 콜백은 생성 시점에 state를 클로저로 캡처해버리므로(effect 의존성을 screeningId/user.id
+  // 로만 고정해 매 선택마다 interval을 새로 걸지 않기 위해), 항상 최신 값을 읽어야 하는 두 상태는 ref로도
+  // 같이 들고 있습니다.
+  const selectedSeatsRef = useRef([])
+  const isSubmittingRef = useRef(false)
   // 네이티브 confirm/alert 대신 쓰는 커스텀 다이얼로그 상태들.
   const [pendingWheelchairSeat, setPendingWheelchairSeat] = useState(null)
+  // "15세이상관람가" 영화에서 청소년 인원을 +1 할 때마다(인원 구분이 "청소년"만으로는 만 12~14세와
+  // 15~18세를 구분 못 하므로) 띄우는 확인 팝업 상태입니다.
+  const [showTeenAgeConfirm, setShowTeenAgeConfirm] = useState(false)
   const [showPaymentConfirm, setShowPaymentConfirm] = useState(false)
   const [resultDialog, setResultDialog] = useState(null) // { title, message, tone }
 
-  // 영화 목록에서 "예매"를 눌러 이 페이지로 들어올 때, 이전 페이지의 스크롤 위치가 그대로 남아있어
-  // 화면 중간부터 보이는 문제가 있어 항상 맨 위에서 시작하도록 맞춥니다.
-  useEffect(() => {
-    window.scrollTo(0, 0)
-  }, [id])
+  // 페이지 이동 시 맨 위로 스크롤하는 건 App.jsx의 전역 ScrollToTop이 처리합니다(라우트가
+  // /booking/:id라 영화를 바꿔도 경로 자체가 바뀌어 거기서 함께 처리됩니다).
 
   useEffect(() => {
     let cancelled = false
@@ -145,25 +159,82 @@ function BookingSeatPage() {
 
   const refreshSeats = () => {
     if (!screeningId) return
-    getScreeningSeats(screeningId).then(setSeats)
+    getScreeningSeats(screeningId, user.id).then(setSeats)
   }
+
+  useEffect(() => {
+    selectedSeatsRef.current = selectedSeats
+  }, [selectedSeats])
+
+  useEffect(() => {
+    isSubmittingRef.current = isSubmitting
+  }, [isSubmitting])
 
   useEffect(() => {
     if (!screeningId) {
       setSeats([])
-      return
+      return undefined
     }
     refreshSeats()
     // 상영관/날짜/회차가 바뀌면 좌석 배치도 달라지니 선택과 결제위젯은 초기화합니다.
     setSelectedSeats([])
     setShowPaymentWidget(false)
+    // 다른 상영으로 넘어가거나 화면을 벗어날 때, 그때까지 선택(선점)해뒀던 좌석들을 best-effort로
+    // 해제합니다 - 실패해도 TTL이 지나면 자동으로 풀리므로 에러는 그냥 무시합니다.
+    return () => {
+      selectedSeatsRef.current.forEach((seatId) => {
+        releaseSeatHold(screeningId, seatId, user.id).catch(() => {})
+      })
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [screeningId])
 
-  const applySeatSelection = (seat) => {
-    setSelectedSeats((prev) =>
-      prev.includes(seat.id) ? prev.filter((seatId) => seatId !== seat.id) : [...prev, seat.id],
-    )
+  // 좌석맵을 주기적으로 다시 불러와 다른 사용자의 선택/예매를 반영하고, 그 사이 내가 선택해둔 좌석들의
+  // 선점 TTL을 계속 갱신합니다(결제위젯이 떠 있는 동안도 포함). 의존성을 screeningId/user.id로만 고정해
+  // 좌석을 빠르게 여러 번 클릭해도 interval이 매번 재설정되며 아예 안 울리는 일이 없게 합니다.
+  useEffect(() => {
+    if (!screeningId) return undefined
+    const tick = () => {
+      if (isSubmittingRef.current) return
+      getScreeningSeats(screeningId, user.id)
+        .then((latestSeats) => {
+          setSeats(latestSeats)
+          const latestById = new Map(latestSeats.map((seat) => [seat.id, seat]))
+          const stillValid = selectedSeatsRef.current.filter((seatId) => {
+            const latest = latestById.get(seatId)
+            return latest && (latest.status === 'AVAILABLE' || latest.heldByMe)
+          })
+          if (stillValid.length !== selectedSeatsRef.current.length) {
+            setSelectedSeats(stillValid)
+          }
+          stillValid.forEach((seatId) => {
+            holdSeat(screeningId, seatId, user.id).catch(() => {})
+          })
+        })
+        .catch(() => {})
+    }
+    const interval = setInterval(tick, SEAT_POLL_INTERVAL_MS)
+    return () => clearInterval(interval)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [screeningId, user.id])
+
+  // 좌석 선택은 곧 서버에 임시 선점(hold)을 거는 것이라 비동기입니다 - 선점에 성공해야 실제로
+  // selectedSeats에 추가되고, 이미 다른 사용자가 선점/예매한 좌석이면 에러로 안내하고 최신 좌석맵을
+  // 다시 불러옵니다. 해제는 결과를 기다리지 않고 낙관적으로 처리합니다(fire-and-forget).
+  const applySeatSelection = async (seat) => {
+    const isCurrentlySelected = selectedSeats.includes(seat.id)
+    if (isCurrentlySelected) {
+      setSelectedSeats((prev) => prev.filter((seatId) => seatId !== seat.id))
+      releaseSeatHold(screeningId, seat.id, user.id).catch(() => {})
+      return
+    }
+    try {
+      await holdSeat(screeningId, seat.id, user.id)
+      setSelectedSeats((prev) => [...prev, seat.id])
+    } catch (error) {
+      setResultDialog({ title: '선택할 수 없는 좌석이에요', message: error.message, tone: 'error' })
+      refreshSeats()
+    }
   }
 
   // 장애인석(휠체어석)을 새로 선택하려는 경우에만, 실수로 누른 게 아닌지 커스텀 다이얼로그로 한 번 더
@@ -188,7 +259,18 @@ function BookingSeatPage() {
 
   const updateTicketCount = (key, delta) => {
     if (disallowedCategories.includes(key)) return
+    // "15세이상관람가" 영화는 청소년(만 12~18세) 중 만 12~14세는 관람할 수 없어서, 청소년 인원을 늘릴
+    // 때마다 먼저 확인 팝업을 띄웁니다(줄일 때는 경고가 필요 없어 delta > 0일 때만).
+    if (key === 'teen' && delta > 0 && requiresTeenAgeWarning(movie.ageRating)) {
+      setShowTeenAgeConfirm(true)
+      return
+    }
     setTicketCounts((prev) => ({ ...prev, [key]: Math.max(0, prev[key] + delta) }))
+  }
+
+  const confirmTeenAgeIncrease = () => {
+    setTicketCounts((prev) => ({ ...prev, teen: prev.teen + 1 }))
+    setShowTeenAgeConfirm(false)
   }
 
   const hasScreenings = screenings.length > 0
@@ -211,6 +293,7 @@ function BookingSeatPage() {
   // 결제위젯의 "결제하기"는 토스 실제 결제창으로 넘어가지 않고, 이 자리에서 바로 예매를 생성합니다
   // (결제수단 선택 UI는 테스트/데모용으로 그대로 보여주되, 실제 결제 승인 절차는 거치지 않습니다).
   const handlePaymentComplete = async () => {
+    setIsSubmitting(true)
     try {
       const booking = await createBooking(user.id, { screeningId, seatIds: selectedSeats, ticketCounts })
       setResultDialog({
@@ -226,6 +309,8 @@ function BookingSeatPage() {
     } catch (error) {
       setResultDialog({ title: '결제에 실패했어요', message: error.message, tone: 'error' })
       refreshSeats()
+    } finally {
+      setIsSubmitting(false)
     }
   }
 
@@ -425,6 +510,16 @@ function BookingSeatPage() {
           confirmLabel="선택"
           onConfirm={confirmWheelchairSeat}
           onCancel={() => setPendingWheelchairSeat(null)}
+        />
+      )}
+
+      {showTeenAgeConfirm && (
+        <ConfirmDialog
+          title="관람 연령 확인"
+          message={'해당 영화는 15세 이상 관람가입니다.\n만 12세~만 14세는 관람할 수 없습니다.'}
+          confirmLabel="확인"
+          onConfirm={confirmTeenAgeIncrease}
+          onCancel={() => setShowTeenAgeConfirm(false)}
         />
       )}
 

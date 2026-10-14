@@ -104,14 +104,37 @@ public class MovieCountCacheService {
         String runtimeKey = normalizeRuntimeKey(runtimeFilter);
 
         Optional<MovieCountCache> cached = repository.findByGenreKeyAndYearKeyAndRuntimeKey(genreKey, yearKey, runtimeKey);
-        boolean fresh = cached.isPresent()
-                && cached.get().getComputedAt().isAfter(LocalDateTime.now().minusHours(CACHE_TTL_HOURS));
-        if (fresh) {
+        if (cached.isPresent()
+                && cached.get().getComputedAt().isAfter(LocalDateTime.now().minusHours(CACHE_TTL_HOURS))) {
             return cached.get().getTotalCount();
         }
 
-        triggerBackgroundScan(genre, genreKey);
-        return cached.map(MovieCountCache::getTotalCount).orElse(fallbackEstimate);
+        // 이 (연도, 러닝타임) 조합 캐시가 없거나 오래됐어도, "장르 전체" 스캔 결과((genre, ALL, ALL) 행)
+        // 자체가 아직 최신이면 재스캔을 또 트리거하지 않습니다 - 1919년 이전처럼 영화가 한 편도 없는 연도는
+        // scanDomesticTotalCounts가 영원히 그 조합의 행을 안 만들어서(발견한 조합만 저장하므로) "이 조합만
+        // 캐시가 없다"가 늘 참이 되고, 예전엔 그때마다 매번 장르 전체 재스캔(몇 분~십수 분 소요, KMDB
+        // 수십~백여 회 호출)을 새로 띄워서, 그 재스캔의 "일단 색인을 통째로 지우고 다시 채우기" 단계
+        // 때문에 재스캔이 끝날 때까지 그 장르의 모든 연도 목록이 통째로 빈 화면이 되는 문제가 있었습니다
+        // (2026-10-13, 오래된 연도를 여러 번 조회해봤더니 재발). 장르 전체 스캔 자체가 오래됐을 때만
+        // 재스캔을 띄우고, 이 조합 하나만 없는 경우엔 트리거하지 않습니다.
+        Optional<MovieCountCache> genreScan = repository.findByGenreKeyAndYearKeyAndRuntimeKey(genreKey, ALL_KEY, ALL_KEY);
+        boolean genreScanFresh = genreScan.isPresent()
+                && genreScan.get().getComputedAt().isAfter(LocalDateTime.now().minusHours(CACHE_TTL_HOURS));
+        if (!genreScanFresh) {
+            triggerBackgroundScan(genre, genreKey);
+        }
+
+        if (cached.isPresent()) {
+            return cached.get().getTotalCount();
+        }
+
+        // 이 조합의 캐시 행이 아예 없을 때, 장르 자체는 이미 최소 한 번 전체 스캔이 끝나 있다면(= (genre,
+        // ALL, ALL) 행이 존재) "아직 못 구한 값"이 아니라 "스캔 중 이 조합에 해당하는 영화를 하나도 못
+        // 찾았다"는 뜻입니다(scanDomesticTotalCounts는 발견한 모든 조합을 빠짐없이 저장하므로, 빠졌다는 건
+        // 0건이 확정입니다). 그 경우에도 fallbackEstimate(이번 페이지의 KMDB 원본 TotalCount - 연도/국내
+        // 필터를 반영하기 전 값이라 수만 건으로 잡힘)를 그대로 보여주면 "건수는 5만 건인데 목록은 0건"처럼
+        // 보여서 혼란스러웠습니다. 장르를 아예 스캔한 적이 없을 때만 fallbackEstimate를 보여줍니다.
+        return genreScan.isPresent() ? 0 : fallbackEstimate;
     }
 
     // movie_year_index에서 실제 목록을 바로 꺼내 써도 되는지(=이 (장르, 연도) 조합의 전체 스캔이
@@ -120,14 +143,41 @@ public class MovieCountCacheService {
     // 부르므로, 트리거는 그쪽에서 이미 일어납니다. runtimeKey는 "ALL"로 고정해서 확인합니다 - 스캔은
     // 러닝타임과 무관하게 장르 하나당 한 번만 돌고, 그 안에서 모든 러닝타임 구간을 한꺼번에 채우기
     // 때문입니다(러닝타임 필터는 색인에서 꺼낸 뒤 MovieService가 직접 거릅니다).
+    // getDomesticTotalCount와 마찬가지로, 스캔된 지 오래된(stale) 색인이라도 "데이터 자체가 있으면"
+    // 그대로 씁니다(freshness는 백그라운드 재스캔을 트리거할지에만 쓰이고, 그 트리거는 이미 같이 호출되는
+    // getDomesticTotalCount 쪽에서 일어납니다). 예전엔 여기서만 freshness를 엄격히 요구해서, 6시간
+    // TTL이 지나자마자 멀쩡한 색인 데이터를 두고도 fetchFilledPage의 "최신순 상위 1500건만 훑는" 폴백으로
+    // 떨어졌습니다 - 그 폴백은 "정보 없음"(연도 미상) 같은 연도 필터를 사실상 영영 못 찾아서(그 1500건
+    // 안에 개봉연도 미상 영화가 섞여 있을 가능성이 극히 낮음), 집계 건수(1,765건)는 그대로인데 실제 목록은
+    // 0건으로 나오는 불일치가 있었습니다(2026-10-13).
     public boolean hasFreshYearIndex(String genre, String year) {
         if (year == null || year.isBlank()) {
             return false;
         }
         String genreKey = normalizeKey(genre);
-        return repository.findByGenreKeyAndYearKeyAndRuntimeKey(genreKey, year, ALL_KEY)
-                .map(cache -> cache.getComputedAt().isAfter(LocalDateTime.now().minusHours(CACHE_TTL_HOURS)))
-                .orElse(false);
+        return repository.findByGenreKeyAndYearKeyAndRuntimeKey(genreKey, year, ALL_KEY).isPresent();
+    }
+
+    // (genre, ALL, ALL) 행이 있으면 이 장르는 전체 카탈로그 스캔이 최소 한 번 끝난 상태라, movie_year_index
+    // 에서 이 장르의 전체 목록을 KMDB 재호출 없이 바로 꺼내 써도 됩니다(다중 장르 검색을 빠르게 하는 용도 -
+    // 2026-10-14 요청). hasFreshYearIndex와 달리 연도 파라미터가 필요 없고(장르 전체 스캔 여부만 봄),
+    // staleness는 신경 쓰지 않습니다(오래된 색인이라도 데이터 자체가 있으면 그대로 씁니다 - 최신화는
+    // ensureGenreScanTriggered가 별도로 트리거하는 백그라운드 재스캔이 끝나는 대로 반영됩니다).
+    public boolean hasCompletedGenreScan(String genre) {
+        String genreKey = normalizeKey(genre);
+        return repository.findByGenreKeyAndYearKeyAndRuntimeKey(genreKey, ALL_KEY, ALL_KEY).isPresent();
+    }
+
+    // 다중 장르 조회에서 hasCompletedGenreScan이 false인 장르를 발견했을 때 호출합니다 - 이번 요청은
+    // 기존 KMDB 폴백으로 응답하되, 이 장르의 스캔을 미리 걸어둬서 다음 조회부터는 빨라지게 합니다.
+    public void ensureGenreScanTriggered(String genre) {
+        String genreKey = normalizeKey(genre);
+        Optional<MovieCountCache> genreScan = repository.findByGenreKeyAndYearKeyAndRuntimeKey(genreKey, ALL_KEY, ALL_KEY);
+        boolean genreScanFresh = genreScan.isPresent()
+                && genreScan.get().getComputedAt().isAfter(LocalDateTime.now().minusHours(CACHE_TTL_HOURS));
+        if (!genreScanFresh) {
+            triggerBackgroundScan(genre, genreKey);
+        }
     }
 
     private String normalizeKey(String value) {

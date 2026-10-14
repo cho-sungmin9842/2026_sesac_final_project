@@ -118,3 +118,11 @@ export function getDisallowedCategories(ageRating) {
   // 허용 쪽) 등은 제한 없음.
   return []
 }
+
+// "15세이상관람가" 영화는 청소년(인원 구분상 만 12~18세) 중 만 12~14세는 법적으로 관람할 수 없습니다.
+// 인원 구분이 "청소년" 하나로 뭉뚱그려져 있어 정확한 나이를 받지 않으므로, 아예 막는 대신(12~14세뿐
+// 아니라 관람 가능한 15~18세까지 전부 막아버리게 됨) 청소년 인원을 추가할 때마다 확인 팝업으로 알리고
+// 사용자가 직접 확인하게 합니다. "12세이상관람가"는 청소년 전 연령(12~18세)이 관람 가능해 해당 없습니다.
+export function requiresTeenAgeWarning(ageRating) {
+  return !!ageRating && ageRating.includes('15세')
+}

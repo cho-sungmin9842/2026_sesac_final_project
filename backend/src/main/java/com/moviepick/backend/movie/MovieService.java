@@ -21,10 +21,12 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
 
 @Service
@@ -133,9 +135,26 @@ public class MovieService {
         String effectiveReleaseDte = hasYearFilter ? null : releaseDte;
 
         if (cleanGenres.size() > 1) {
-            // KMDB genre 파라미터는 한 번에 장르 하나만 받기 때문에(부분일치), 선호 장르가 여러 개(홈 화면
-            // "취향저격 신작 (장르: 코미디, 스릴러, 액션)"처럼)로 필터링할 땐 장르별로 따로 호출한 뒤 합쳐야 합니다.
-            allMovies = searchByMultipleGenres(query, cleanGenres, effectiveReleaseDts, effectiveReleaseDte, rawListCount, field, kmdbSort);
+            // movie_year_index에 각 장르의 전체 스캔이 이미 끝나 있으면(화면의 "전체 영화 N건" 표시용으로
+            // MovieCountCacheService가 이미 한 번씩 훑어둔 색인), KMDB를 장르 개수만큼 또 부르지 않고 그
+            // 색인들만 합쳐서 바로 서빙합니다 - 기존 방식(searchByMultipleGenres)은 병렬화해도 장르당
+            // 최대 500건씩 KMDB를 다시 불러야 해 몇 초가 걸렸는데, 이 경로는 전부 DB 조회라 체감상 즉시
+            // 응답됩니다(2026-10-14 요청 - "이전엔 바로 보였는데 느려짐"). 검색어가 있으면(hasQuery)
+            // 색인만으로는 텍스트 일치를 걸러낼 수 없어 이 경로를 쓸 수 없고, 장르 중 하나라도 아직 스캔
+            // 전이면 그 장르들의 스캔을 트리거해두고(다음 조회부터는 빨라짐) 이번만 기존 방식으로 응답합니다.
+            boolean allGenresScanned = !hasQuery
+                    && cleanGenres.stream().allMatch(movieCountCacheService::hasCompletedGenreScan);
+            if (allGenresScanned) {
+                allMovies = fetchIndexedMultiGenrePage(cleanGenres);
+            } else {
+                if (!hasQuery) {
+                    cleanGenres.forEach(movieCountCacheService::ensureGenreScanTriggered);
+                }
+                // KMDB genre 파라미터는 한 번에 장르 하나만 받기 때문에(부분일치), 선호 장르가 여러 개(홈
+                // 화면 "취향저격 신작 (장르: 코미디, 스릴러, 액션)"처럼)로 필터링할 땐 장르별로 따로 호출한
+                // 뒤 합쳐야 합니다.
+                allMovies = searchByMultipleGenres(query, cleanGenres, effectiveReleaseDts, effectiveReleaseDte, rawListCount, field, kmdbSort);
+            }
         } else {
             String genre = cleanGenres.isEmpty() ? null : cleanGenres.get(0);
             // 검색창의 영화/배우/감독 드롭다운이 고른 필드로, 해외 영화를 뺀 국내 영화만, 정렬까지 맞춰서
@@ -153,7 +172,7 @@ public class MovieService {
                 .filter(movie -> KmdbTextUtils.matchesRuntimeFilter(movie.runtimeMinutes(), runtime))
                 .filter(movie -> matchesYearFilter(movie.year(), year))
                 .toList();
-        allMovies = sortMovies(allMovies, sort);
+        allMovies = sortMovies(allMovies, sort, field, query);
 
         int fromIndex = Math.min((page - 1) * pageSize, allMovies.size());
         int toIndex = Math.min(page * pageSize, allMovies.size());
@@ -165,18 +184,50 @@ public class MovieService {
         return new MovieSearchResultDto(movies, page, pageSize, totalCount, totalPages);
     }
 
+    // fetchYearIndexedPage와 같은 movie_year_index를 쓰지만, 연도를 하나로 좁히지 않고 장르별 전체
+    // 목록(모든 연도)을 가져와 합칩니다 - 개봉연도=전체인 다중 장르 조회용입니다. 러닝타임/연도 필터와
+    // 정렬은 이 메서드가 하지 않고, search()의 공용 후처리(matchesRuntimeFilter/matchesYearFilter/
+    // sortMovies)가 다른 경로들과 똑같이 처리합니다 - 필터링 로직을 두 곳에 중복시키지 않기 위함입니다.
+    private List<MovieSummaryDto> fetchIndexedMultiGenrePage(List<String> genres) {
+        LinkedHashSet<String> movieIds = new LinkedHashSet<>();
+        for (String genre : genres) {
+            for (MovieYearIndex row : movieYearIndexRepository.findByGenreKeyOrderByDisplayOrderAsc(genre)) {
+                movieIds.add(row.getMovieId());
+            }
+        }
+        List<String> idList = new ArrayList<>(movieIds);
+
+        Map<String, RatingSummary> ratings = reviewService.getRatingSummaries(idList);
+        Map<String, MovieCacheService.MovieSummaryRating> ratingsForCache = ratings.entrySet().stream()
+                .collect(Collectors.toMap(
+                        Map.Entry::getKey, e -> new MovieCacheService.MovieSummaryRating(e.getValue().averageScore(), (int) e.getValue().reviewCount())));
+        return movieCacheService.findCachedSummariesInOrder(idList, ratingsForCache);
+    }
+
+    // 장르를 여러 개(예: 범죄+스포츠) 고르면 KMDB genre 파라미터가 한 번에 하나만 받아서 장르 개수만큼
+    // 호출해야 하는데, 예전엔 이걸 순서대로(for문) 불러서 장르 개수에 거의 비례해 응답 시간이 늘어났습니다
+    // (2026-10-14 실측 - 장르 2개 선택 시 눈에 띄게 느려짐, 직전 턴에서 다중 장르 필터가 정상 동작하도록
+    // 고치면서 체감되기 시작함). KMDB 호출은 서로 독립적이라 CompletableFuture로 동시에 보내 가장 느린
+    // 호출 하나만큼의 시간으로 줄입니다. 다만 toRatedSummaries는 영화 캐시 테이블에 읽고 쓰는 작업이라,
+    // 같은 영화가 두 장르에 걸쳐 있으면(흔함) 두 스레드가 동시에 같은 행을 upsert하다 충돌할 수 있어
+    // - KMDB 응답을 모으고 중복만 제거한 뒤 메인 스레드에서 딱 한 번만 호출합니다.
     private List<MovieSummaryDto> searchByMultipleGenres(
             String query, List<String> genres, String releaseDts, String releaseDte, int rawListCount, String field, String kmdbSort
     ) {
-        Map<String, MovieSummaryDto> merged = new LinkedHashMap<>();
-        for (String genre : genres) {
-            KmdbSearchResponse response = searchByField(field, query, genre, releaseDts, releaseDte, rawListCount, 0, kmdbSort);
-            List<KmdbMovieItem> matchedItems = filterByQuery(response.allItems(), field, query);
-            for (MovieSummaryDto movie : toRatedSummaries(matchedItems)) {
-                merged.putIfAbsent(movie.id(), movie);
+        List<CompletableFuture<List<KmdbMovieItem>>> futures = genres.stream()
+                .map(genre -> CompletableFuture.supplyAsync(() -> {
+                    KmdbSearchResponse response = searchByField(field, query, genre, releaseDts, releaseDte, rawListCount, 0, kmdbSort);
+                    return filterByQuery(response.allItems(), field, query);
+                }))
+                .toList();
+
+        Map<String, KmdbMovieItem> mergedItems = new LinkedHashMap<>();
+        for (CompletableFuture<List<KmdbMovieItem>> future : futures) {
+            for (KmdbMovieItem item : future.join()) {
+                mergedItems.putIfAbsent(movieMapper.toId(item), item);
             }
         }
-        return new ArrayList<>(merged.values());
+        return toRatedSummaries(new ArrayList<>(mergedItems.values()));
     }
 
     // KMDB는 검색어를 형태소 단위로 쪼개 부분 일치시키므로("군체" -> "군"+"군체"), 실제로 검색어 문자열을
@@ -234,6 +285,16 @@ public class MovieService {
     }
 
     private List<MovieSummaryDto> sortMovies(List<MovieSummaryDto> movies, String sort) {
+        return sortMovies(movies, sort, null, null);
+    }
+
+    // field/query가 있으면(검색창에 제목을 입력한 경우) 사용자가 입력한 제목과 완전히 같은 영화를 먼저
+    // 보여주고, 그 다음에 제목에 포함만 된(부분일치) 영화를 보여줍니다 - 지금까지는 "포함"으로 걸러낸
+    // 결과를 그대로(최신순/이름순 등으로만) 섞어서 보여줘, 완전히 같은 제목의 영화가 목록 중간/뒤쪽에
+    // 묻히는 문제가 있었습니다(2026-10-14 실측). 장르/연도만으로 찾아볼 때(query 없음)나 배우/감독/키워드
+    // 검색에는 "제목이 완전히 같다"는 개념 자체가 없으므로 field가 title(또는 미지정=기본값)이고 query가
+    // 있을 때만 적용합니다. 같은 그룹(완전일치 vs 부분일치) 안에서는 기존 정렬 기준을 그대로 씁니다.
+    private List<MovieSummaryDto> sortMovies(List<MovieSummaryDto> movies, String sort, String field, String query) {
         Comparator<MovieSummaryDto> comparator;
         if ("name".equals(sort)) {
             // title이 빈 값이라 null인 항목도 있어서(KmdbTextUtils.clean), Collator 비교 전에 null을 뒤로 뺍니다.
@@ -248,7 +309,24 @@ public class MovieService {
             comparator = Comparator.comparing((MovieSummaryDto movie) -> movie.year() == null ? Integer.MIN_VALUE : movie.year())
                     .reversed();
         }
+        boolean titleSearch = query != null && !query.isBlank() && (field == null || "title".equals(field));
+        if (titleSearch) {
+            comparator = Comparator.comparing((MovieSummaryDto movie) -> isExactTitle(movie, query) ? 0 : 1)
+                    .thenComparing(comparator);
+        }
         return movies.stream().sorted(comparator).toList();
+    }
+
+    // 공백 차이만 있어도 같은 제목으로 보는 기준은 containsIgnoreCase와 동일하게 맞춥니다("퍼펙트 게임"
+    // 입력 시 "퍼펙트게임"도 완전일치로 쳐야 하므로, 공백 제거 후 비교).
+    private boolean isExactTitle(MovieSummaryDto movie, String query) {
+        String title = KmdbTextUtils.clean(movie.title());
+        String needle = KmdbTextUtils.clean(query);
+        if (title == null || needle == null) {
+            return false;
+        }
+        return title.toLowerCase(Locale.KOREAN).replaceAll("\\s+", "")
+                .equals(needle.toLowerCase(Locale.KOREAN).replaceAll("\\s+", ""));
     }
 
     // 예매 화면의 "상영중인 영화" 목록 - 실제 상영 스케줄 API가 없어서, 최근 4주 내 개봉일자(releaseDts~releaseDte)로

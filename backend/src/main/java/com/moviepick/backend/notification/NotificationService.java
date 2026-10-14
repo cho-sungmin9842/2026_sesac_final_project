@@ -39,8 +39,14 @@ public class NotificationService {
     // ON DELETE CASCADE FK라, 취소로 지워질 예매의 id를 그대로 넣으면 이 알림까지 같이 cascade로
     // 지워져버립니다. 그래서 bookingId 없이(null) 저장합니다 - 어차피 더 이상 존재하지 않는 예매라
     // "눌러서 예매 보기"로 이어질 곳도 없습니다.
-    public void notifyBookingCancelled(User bookingUser, String summary) {
-        notificationRepository.save(new Notification(bookingUser, "예매가 취소되었습니다 - " + summary, null));
+    // refundAmount: 실제 PG 연동 없이(TossPaymentWidget은 데모용) 취소된 예매의 결제 금액을 그대로
+    // "환불 예정 금액"으로 안내만 합니다(2026-10-14 요청) - 예매 당사자에게만 필요한 정보라 관리자
+    // 알림에는 붙이지 않습니다.
+    public void notifyBookingCancelled(User bookingUser, String summary, int refundAmount) {
+        notificationRepository.save(new Notification(
+                bookingUser,
+                "예매가 취소되었습니다 - %s (환불 예정 금액: %,d원)".formatted(summary, refundAmount),
+                null));
 
         for (User admin : userRepository.findByAdminTrue()) {
             if (admin.getId().equals(bookingUser.getId())) {

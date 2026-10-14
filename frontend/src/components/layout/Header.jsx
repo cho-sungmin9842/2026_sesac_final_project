@@ -6,7 +6,7 @@ import NotificationBell from './NotificationBell'
 const NAV_LINKS = [
   { to: '/', label: '홈' },
   { to: '/booking', label: '예매' },
-  { to: '/ai-chat', label: 'AI 추천' },
+  { to: '/ai-chat', label: 'AI 챗봇' },
 ]
 
 // value는 KMDB 검색 API의 실제 파라미터명(title/actor/director)과 동일하게 맞춥니다.

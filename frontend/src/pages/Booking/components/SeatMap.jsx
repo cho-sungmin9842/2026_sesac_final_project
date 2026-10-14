@@ -7,6 +7,7 @@ const EDGE_BLOCK_SIZE = 3
 function seatClassName(state, isAccessible) {
   const accessibleRing = isAccessible ? 'ring-2 ring-blue-400 ring-offset-1 ring-offset-slate-950' : ''
   if (state === 'reserved') return `bg-slate-700 cursor-not-allowed ${accessibleRing}`
+  if (state === 'held') return `bg-purple-600 cursor-not-allowed ${accessibleRing}`
   if (state === 'selected') return `bg-orange-500 ${accessibleRing}`
   return `bg-gray-300 hover:bg-orange-300 ${accessibleRing}`
 }
@@ -59,9 +60,10 @@ function SeatMap({ seats, selectedSeats, onToggleSeat }) {
             <span className="w-4 text-xs text-gray-400">{row}</span>
             {seatsByRow[row].map((seat) => {
               const isReserved = seat.status === 'BOOKED'
+              const isHeldByOther = seat.status === 'HELD' && !seat.heldByMe
               const isSelected = selectedSeats.includes(seat.id)
               const isAccessible = seat.seatType === 'WHEELCHAIR'
-              const state = isReserved ? 'reserved' : isSelected ? 'selected' : 'available'
+              const state = isReserved ? 'reserved' : isHeldByOther ? 'held' : isSelected ? 'selected' : 'available'
               const label = `${seat.rowLabel}${seat.colNo}`
               // 블록(왼쪽/가운데/오른쪽)이 바뀌는 경계에 통로 간격을 둡니다.
               const isBlockStart =
@@ -71,7 +73,7 @@ function SeatMap({ seats, selectedSeats, onToggleSeat }) {
                 <button
                   key={seat.id}
                   type="button"
-                  disabled={isReserved}
+                  disabled={isReserved || isHeldByOther}
                   onClick={() => onToggleSeat(seat)}
                   aria-label={isAccessible ? `${label} (장애인석)` : label}
                   className={`h-5 w-5 rounded-sm text-[10px] ${seatClassName(state, isAccessible)} ${isBlockStart ? 'ml-4' : ''}`}
@@ -88,6 +90,9 @@ function SeatMap({ seats, selectedSeats, onToggleSeat }) {
         </span>
         <span className="flex items-center gap-1.5">
           <span className="h-4 w-4 rounded-sm bg-orange-500" /> 선택됨
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="h-4 w-4 rounded-sm bg-purple-600" /> 다른 사용자 선택 중
         </span>
         <span className="flex items-center gap-1.5">
           <span className="h-4 w-4 rounded-sm bg-slate-700" /> 예약 완료

@@ -90,6 +90,7 @@ function HomePage() {
               title={`취향저격 신작 (장르: ${genreLabelText})`}
               movies={recommendedMovies}
               viewAllTo={recommendedViewAllTo}
+              viewAllLabel="더보기"
             />
           )}
         </>

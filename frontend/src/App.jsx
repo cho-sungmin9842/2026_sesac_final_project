@@ -1,4 +1,5 @@
 import { Navigate, Route, Routes } from 'react-router-dom'
+import ScrollToTop from './components/common/ScrollToTop'
 import MainLayout from './layouts/MainLayout'
 import AdminLayout from './layouts/AdminLayout'
 import HomePage from './pages/Home/HomePage'
@@ -19,42 +20,45 @@ import RequireAuth from './auth/RequireAuth'
 
 function App() {
   return (
-    <Routes>
-      <Route path="/login" element={<LoginPage />} />
-      <Route path="/signup" element={<SignupPage />} />
+    <>
+      <ScrollToTop />
+      <Routes>
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="/signup" element={<SignupPage />} />
 
-      <Route
-        element={
-          <RequireAuth>
-            <MainLayout />
-          </RequireAuth>
-        }
-      >
-        <Route path="/" element={<HomePage />} />
-        <Route path="/movies" element={<MovieListPage />} />
-        <Route path="/movies/:id" element={<MovieDetailPage />} />
-        <Route path="/ai-chat" element={<AiChatPage />} />
-        <Route path="/booking" element={<BookingListPage />} />
-        <Route path="/booking/:id" element={<BookingSeatPage />} />
-        <Route path="/payment/success" element={<PaymentSuccessPage />} />
-        <Route path="/payment/fail" element={<PaymentFailPage />} />
-        <Route path="/mypage" element={<MyPage />} />
-      </Route>
+        <Route
+          element={
+            <RequireAuth>
+              <MainLayout />
+            </RequireAuth>
+          }
+        >
+          <Route path="/" element={<HomePage />} />
+          <Route path="/movies" element={<MovieListPage />} />
+          <Route path="/movies/:id" element={<MovieDetailPage />} />
+          <Route path="/ai-chat" element={<AiChatPage />} />
+          <Route path="/booking" element={<BookingListPage />} />
+          <Route path="/booking/:id" element={<BookingSeatPage />} />
+          <Route path="/payment/success" element={<PaymentSuccessPage />} />
+          <Route path="/payment/fail" element={<PaymentFailPage />} />
+          <Route path="/mypage" element={<MyPage />} />
+        </Route>
 
-      <Route
-        path="/admin"
-        element={
-          <RequireAuth adminOnly>
-            <AdminLayout />
-          </RequireAuth>
-        }
-      >
-        <Route index element={<Navigate to="reports" replace />} />
-        <Route path="reports" element={<AdminReportsPage />} />
-        <Route path="members" element={<AdminMembersPage />} />
-        <Route path="screenings" element={<AdminScreeningsPage />} />
-      </Route>
-    </Routes>
+        <Route
+          path="/admin"
+          element={
+            <RequireAuth adminOnly>
+              <AdminLayout />
+            </RequireAuth>
+          }
+        >
+          <Route index element={<Navigate to="reports" replace />} />
+          <Route path="reports" element={<AdminReportsPage />} />
+          <Route path="members" element={<AdminMembersPage />} />
+          <Route path="screenings" element={<AdminScreeningsPage />} />
+        </Route>
+      </Routes>
+    </>
   )
 }
 

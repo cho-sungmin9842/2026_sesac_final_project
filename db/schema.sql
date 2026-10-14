@@ -214,14 +214,21 @@ ALTER TABLE chat_messages
 
 -- 상영 1건당 좌석(8행 A~H x 14열 = 112석, A열은 전부 휠체어석). 상영정보 생성 배치가 상영정보와 함께
 -- 만들고, 실제 예매 상황을 흉내 내려고 약 15%는 미리 BOOKED로 채워둡니다.
+-- status: AVAILABLE/HELD/BOOKED. HELD는 좌석 선택~결제(또는 좌석변경 확정) 전까지의 임시 선점으로,
+-- held_by_user_id/held_until이 그 선점 주체와 만료 시각입니다(Seat.effectiveStatus()가 만료를 지연
+-- 판정하므로, held_until이 지난 HELD 행은 실제로는 AVAILABLE처럼 취급됩니다 - SeatHoldCleanupService가
+-- 주기적으로 되돌려주지만 정확성 자체는 그 배치에 의존하지 않습니다).
 CREATE TABLE IF NOT EXISTS seats (
-    id           BIGINT AUTO_INCREMENT PRIMARY KEY,
-    screening_id BIGINT      NOT NULL,
-    row_label    VARCHAR(1)  NOT NULL,
-    col_no       INT         NOT NULL,
-    seat_type    VARCHAR(20) NOT NULL,
-    status       VARCHAR(20) NOT NULL,
-    CONSTRAINT fk_seats_screening FOREIGN KEY (screening_id) REFERENCES screenings (id) ON DELETE CASCADE
+    id              BIGINT AUTO_INCREMENT PRIMARY KEY,
+    screening_id    BIGINT      NOT NULL,
+    row_label       VARCHAR(1)  NOT NULL,
+    col_no          INT         NOT NULL,
+    seat_type       VARCHAR(20) NOT NULL,
+    status          VARCHAR(20) NOT NULL,
+    held_by_user_id BIGINT      NULL,
+    held_until      DATETIME    NULL,
+    CONSTRAINT fk_seats_screening FOREIGN KEY (screening_id) REFERENCES screenings (id) ON DELETE CASCADE,
+    INDEX idx_seats_status_held_until (status, held_until)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
 
 -- 영화 예매 내역. 상영관/날짜/시간/영화 제목은 더 이상 문자열로 중복 저장하지 않고 screening_id 하나로만

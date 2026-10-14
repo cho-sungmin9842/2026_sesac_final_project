@@ -31,7 +31,7 @@ public class ReviewService {
     }
 
     public List<ReviewDto> listByUser(Long userId) {
-        return reviewRepository.findByUserIdOrderByCreatedAtDesc(userId).stream()
+        return reviewRepository.findByUserIdOrderByCreatedAtDescIdDesc(userId).stream()
                 .map(ReviewDto::from)
                 .toList();
     }

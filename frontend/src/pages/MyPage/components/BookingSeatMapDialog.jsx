@@ -11,6 +11,9 @@ function seatClassName(seat, isSelected) {
   const accessibleRing = seat.seatType === 'WHEELCHAIR' ? 'ring-2 ring-sky-400 ring-offset-1 ring-offset-slate-900' : ''
   const selectedRing = isSelected ? 'ring-2 ring-white ring-offset-1 ring-offset-slate-900' : ''
 
+  if (seat.status === 'HELD' && !seat.heldByMe) {
+    return `bg-purple-600 cursor-not-allowed ${accessibleRing}`
+  }
   if (seat.status !== 'BOOKED') {
     return `bg-slate-600 hover:bg-slate-500 cursor-pointer ${accessibleRing}`
   }
@@ -28,16 +31,17 @@ function BookingSeatMapDialog({ booking, userId, onClose, onSeatChanged }) {
   const [selectedSeatId, setSelectedSeatId] = useState(null)
   const [isChanging, setIsChanging] = useState(false)
 
-  // 다이얼로그가 열려있는 동안 좌석변경에 성공한 뒤 최신 상태로 다시 불러올 때도 재사용합니다.
-  const loadSeats = () => {
-    setStatus('loading')
+  // 다이얼로그가 열려있는 동안 좌석변경에 성공한 뒤 최신 상태로 다시 불러올 때도 재사용합니다. silent가
+  // true면(주기적 폴링용) 화면을 "불러오는 중..."으로 되돌리지 않고 좌석 데이터만 조용히 갱신합니다.
+  const loadSeats = (silent = false) => {
+    if (!silent) setStatus('loading')
     return getScreeningSeats(booking.screeningId, userId)
       .then((result) => {
         setSeats(result)
         setStatus('ready')
       })
       .catch(() => {
-        setStatus('error')
+        if (!silent) setStatus('error')
       })
   }
 
@@ -46,8 +50,19 @@ function BookingSeatMapDialog({ booking, userId, onClose, onSeatChanged }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [booking.screeningId, userId])
 
+  // 다른 사용자가 예매 화면에서 선점(hold) 중인 좌석이 생기면 바로 반영되도록 다이얼로그가 열려있는
+  // 동안 주기적으로 다시 불러옵니다(NotificationBell.jsx와 같은 폴링 패턴).
+  useEffect(() => {
+    const interval = setInterval(() => loadSeats(true), 5000)
+    return () => clearInterval(interval)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [booking.screeningId, userId])
+
   const handleSeatClick = async (seat) => {
     if (isChanging) return
+
+    // 다른 사용자가 예매 화면에서 선점 중인 좌석은 선택할 수 없습니다.
+    if (seat.status === 'HELD' && !seat.heldByMe) return
 
     // 다른 예매자의 좌석은 선택할 수 없습니다.
     if (seat.status === 'BOOKED' && !seat.bookedByMe) return
@@ -117,6 +132,20 @@ function BookingSeatMapDialog({ booking, userId, onClose, onSeatChanged }) {
               <span className="text-sm font-bold tracking-[0.4em] text-white">SCREEN</span>
             </div>
             <div className={`flex flex-col items-center gap-1.5 ${isChanging ? 'pointer-events-none opacity-60' : ''}`}>
+              <div className="flex items-center gap-1.5">
+                <span className="w-4" />
+                {Array.from({ length: colCount }, (_, i) => i + 1).map((colNo) => {
+                  const isBlockStart = colNo !== 1 && (colNo === EDGE_BLOCK_SIZE + 1 || colNo === colCount - EDGE_BLOCK_SIZE + 1)
+                  return (
+                    <span
+                      key={colNo}
+                      className={`flex h-5 w-5 items-center justify-center text-[10px] text-gray-500 ${isBlockStart ? 'ml-4' : ''}`}
+                    >
+                      {colNo}
+                    </span>
+                  )
+                })}
+              </div>
               {rows.map((row) => (
                 <div key={row} className="flex items-center gap-1.5">
                   <span className="w-4 text-xs text-gray-500">{row}</span>
@@ -148,6 +177,9 @@ function BookingSeatMapDialog({ booking, userId, onClose, onSeatChanged }) {
               </span>
               <span className="flex items-center gap-1.5">
                 <span className="h-4 w-4 rounded-sm bg-rose-500/80" /> 다른 예매자 좌석
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="h-4 w-4 rounded-sm bg-purple-600" /> 다른 사용자 선택 중
               </span>
               <span className="flex items-center gap-1.5">
                 <span className="h-4 w-4 rounded-sm bg-slate-600" /> 좌석변경 가능

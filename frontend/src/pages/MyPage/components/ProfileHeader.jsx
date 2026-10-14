@@ -30,7 +30,7 @@ function ProfileHeader({ user, onChangePassword, onDeleteAccount }) {
         </div>
         <div>
           <p className="text-xl font-bold text-white">{user.reviewCount}</p>
-          <p className="text-xs text-gray-400">평점 남김</p>
+          <p className="text-xs text-gray-400">리뷰</p>
         </div>
         <div>
           <p className="text-xl font-bold text-white">{user.wishlistCount}</p>

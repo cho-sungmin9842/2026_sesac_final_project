@@ -143,7 +143,7 @@ public class ChatService {
     @Transactional(readOnly = true)
     public List<ChatMessageDto> historyForConversation(Long userId, Long conversationId) {
         ChatConversation conversation = requireOwnedConversation(userId, conversationId);
-        return chatMessageRepository.findByConversationIdOrderByCreatedAtAsc(conversation.getId()).stream()
+        return chatMessageRepository.findByConversationIdOrderByCreatedAtAscIdAsc(conversation.getId()).stream()
                 .map(message -> new ChatMessageDto(
                         message.getRole(), message.getContent(), moviesFrom(message.getMovieIds()),
                         seatStatusFrom(message.getScreeningId())))
@@ -197,7 +197,7 @@ public class ChatService {
                 ? startConversation(user, request.message())
                 : requireOwnedConversation(userId, request.conversationId());
 
-        List<ChatMessage> fullHistory = chatMessageRepository.findByConversationIdOrderByCreatedAtAsc(conversation.getId());
+        List<ChatMessage> fullHistory = chatMessageRepository.findByConversationIdOrderByCreatedAtAscIdAsc(conversation.getId());
 
         // 바로 직전 AI 메시지가 리뷰의 평점/내용 중 하나를 되물은 상태라면, 지금 이 메시지는 무슨 내용이든
         // (장르 이름이 섞여 있든 "찜"이 들어있든) 전부 그 답으로 받아야 하므로, 다른 어떤 분기보다도 먼저
@@ -210,6 +210,18 @@ public class ChatService {
                 String lastAiMessage = fullHistory.get(fullHistory.size() - 1).getContent();
                 return handlePendingReviewReply(user, conversation, request.message(), movie, pendingReviewState, lastAiMessage);
             }
+        }
+
+        // "어제"/"작일"/"전일"과 "저번주"/"지난주"/"저저번주"/"지지난주"처럼 과거 상영 정보를 물어보면
+        // 무조건 "이미 지난 날짜..."로만 답해야 합니다(과거 데이터는 어떤 조건이 섞여 있어도 보여줄 수
+        // 없는 규칙이라 Gemini 분류 결과와 무관하게 항상 같은 결론). 그런데 이 판단을 Gemini 의도 분류
+        // 뒤로 두면, 같은 질문을 같은 대화에서 반복할수록 대화 이력이 쌓여 Gemini가 off_topic 등 엉뚱한
+        // 의도로 오분류하면서 답이 매번 달라지는 문제가 있었습니다(2026-10-13 실측 - 동일 질문 3연속 시
+        // 2번째 턴부터 "저는 영화 추천을 도와드리는 AI예요"로 변함). Gemini를 아예 거치지 않고 가장 먼저
+        // 결정적으로 답해 반복 질문에도 항상 같은 답이 나오게 합니다.
+        if (request.message().contains("상영")
+                && (YESTERDAY_HINT.matcher(request.message()).find() || LAST_WEEK_HINT.matcher(request.message()).find())) {
+            return persistTurn(user, conversation, request.message(), PAST_SCREENING_REPLY, List.of());
         }
 
         // 의도 분류 + 조건/슬롯 추출을 한 번의 Gemini 구조화 출력 호출로 전부 처리합니다(예전엔 찜/리뷰/
@@ -228,6 +240,32 @@ public class ChatService {
         filter = applyMoreHintFallback(filter, request.message(), fullHistory);
         filter = applySeatChangeHintFallback(filter, request.message());
         filter = applyBookingCancelHintFallback(filter, request.message());
+
+        // "오늘"/"지금"/"금일"/"당일"과 "내일"/"명일"/"익일"도 "어제"/"작일"과 같은 이유로 Gemini 의도
+        // 분류보다 먼저, 결정적으로 처리합니다 - 대화가 길어질수록 Gemini가 intent를 off_topic 등으로
+        // 잘못 분류해 같은 질문을 반복할 때마다 답이 달라지는 문제가 "어제"뿐 아니라 "오늘"/"내일"에서도
+        // 똑같이 날 수 있었습니다(2026-10-13 요청). intent는 대화 맥락에 흔들리기 쉬운 반면 genre/query/
+        // year 같은 슬롯은 이번 메시지 자체에서 뽑히므로 상대적으로 안정적이라, intent 대신 그 슬롯들이
+        // 전부 비어있는지(순수 날짜 질문인지)만으로 판단합니다. "상영중인 영화들 중에서 좀비 영화
+        // 알려줘"처럼 장르/검색어/연도 조건이 함께 온 복합 질문은 그대로 Gemini 기반 recommend
+        // 파이프라인(restrictToNowShowing)으로 흘려보내야 하므로 건드리지 않습니다.
+        boolean isPureScreeningQuery = filter.genre() == null && filter.query() == null && filter.year() == null;
+        if (request.message().contains("상영") && isPureScreeningQuery) {
+            if (TODAY_HINT.matcher(request.message()).find()) {
+                return answerDateScreeningQuestion(user, conversation, request.message(), LocalDate.now());
+            }
+            if (TOMORROW_HINT.matcher(request.message()).find()) {
+                return answerDateScreeningQuestion(user, conversation, request.message(), LocalDate.now().plusDays(1));
+            }
+        }
+        // "이번 주말에 볼만한 영화 추천해줘"(사이드바 빠른 답장 버튼 문구)는 "상영"이라는 단어 자체가 없어
+        // 위 블록으로는 안 잡히므로 따로 확인합니다. 채팅을 보낸 날짜가 속한 "이번 주"의 토/일을 계산해
+        // 실제 screenings 테이블로 답합니다(일반 추천 파이프라인의 KMDB 카탈로그 검색은 날짜와 무관한
+        // 결과를 섞어줄 수 있어 2026-10-14 요청). "다음 주말"/"저번 주말"처럼 다른 주를 콕 집었으면
+        // THIS_WEEKEND_HINT 자체가 매칭하지 않으므로(아래 정의 참고) 여기로 오지 않습니다.
+        if (isPureScreeningQuery && THIS_WEEKEND_HINT.matcher(request.message()).find()) {
+            return answerThisWeekendScreeningQuestion(user, conversation, request.message());
+        }
 
         String intent = filter.intent() == null ? "" : filter.intent();
         switch (intent) {
@@ -296,18 +334,12 @@ public class ChatService {
         // (movie_question 쪽의 SCREENING_QUESTION_HINT)가 이미 처리 못한, 즉 특정 영화명이 없는 순수
         // 날짜 질문만 여기서 잡아 실제 screenings 테이블로 직접 답합니다.
         if (request.message().contains("상영")) {
+            // "어제"/"작일"(과거)과 "오늘"/"지금"/"금일"/"당일", "내일"/"명일"/"익일"(미래) 질문은 이
+            // 블록보다 훨씬 앞, intent 분기 전에 이미 결정적으로 처리되어 여기까지 오지 않습니다(reply()
+            // 상단 참고) - 대화가 길어지면 Gemini 분류가 흔들려 반복 질문마다 다른 답이 나오는 문제가
+            // 있었기 때문입니다(2026-10-13 실측/요청). 여기서는 "10월 15일"/"10/15"처럼 숫자로 콕 집은
+            // 명시적 날짜만 남아서 처리합니다.
             LocalDate mentionedDate = extractMentionedDate(request.message());
-            // "지금"/"오늘"처럼 숫자 날짜 없이 오늘을 가리킨 경우도 같은 방식(실제 screenings 테이블 +
-            // 접속 시점 기준 지난 회차 제외)으로 답합니다 - 예전엔 "지금 상영중인 영화를 찾아줘"가 날짜
-            // 무관하게 "최근 4주 개봉작" 스냅샷(nowShowingMovies)을 그대로 보여줘서, 오늘 날짜를 숫자로
-            // 콕 집어 물었을 때(예: "10/11 상영중인 영화 알려줘")와 결과가 다를 수 있었습니다(2026-10-11
-            // 지적) - 같은 질문이면 어떻게 표현하든 같은(실제 DB 기준) 답을 주도록 통일합니다. 다만 "상영중인
-            // 영화들 중에서 좀비 영화 알려줘"처럼 장르/검색어/연도 조건이 함께 온 복합 질문은 이 날짜 전용
-            // 답변으로는 조건을 반영할 수 없으니(필터링 기능이 없음) 건드리지 않고 기존 경로로 둡니다.
-            boolean isPureScreeningQuery = filter.genre() == null && filter.query() == null && filter.year() == null;
-            if (mentionedDate == null && isPureScreeningQuery && TODAY_HINT.matcher(request.message()).find()) {
-                mentionedDate = LocalDate.now();
-            }
             if (mentionedDate != null) {
                 return answerDateScreeningQuestion(user, conversation, request.message(), mentionedDate);
             }
@@ -327,6 +359,16 @@ public class ChatService {
             // 다음 주인 것처럼 보여주지 말고 명확히 "없습니다"로 답해야 합니다.
             if (NEXT_WEEK_HINT.matcher(request.message()).find()) {
                 return answerNextWeekScreeningQuestion(user, conversation, request.message());
+            }
+            // "11월이나 12월에 상영하는 영화 알려줘"처럼 일 없이 월만 콕 집은 경우입니다. 위에서 이미
+            // extractMentionedDate(일까지 있는 날짜)가 먼저 확인됐으니, 여기 도달했다면 일 없이 월만
+            // 언급된 경우만 남습니다.
+            java.util.regex.Matcher bareMonthMatcher = BARE_MONTH_HINT.matcher(request.message());
+            if (bareMonthMatcher.find()) {
+                int month = Integer.parseInt(bareMonthMatcher.group(1));
+                if (month >= 1 && month <= 12) {
+                    return answerMonthScreeningQuestion(user, conversation, request.message(), month);
+                }
             }
         }
 
@@ -594,6 +636,11 @@ public class ChatService {
     private static final java.util.regex.Pattern KOREAN_DATE_HINT =
             java.util.regex.Pattern.compile("(\\d{1,2})\\s*월\\s*(\\d{1,2})\\s*일");
 
+    // "11월에 상영하는 영화 알려줘"/"12월에 개봉하는 영화 알려줘"처럼 일(day) 없이 월만 콕 집어 물어본
+    // 경우입니다. "10월 15일"처럼 일까지 있는 날짜는 KOREAN_DATE_HINT가 먼저 잡아 위에서 이미 처리되므로,
+    // 여기까지 오면 일 없이 월만 있는 경우만 남습니다.
+    private static final java.util.regex.Pattern BARE_MONTH_HINT = java.util.regex.Pattern.compile("(\\d{1,2})\\s*월");
+
     // "10월 15일"/"10/15"처럼 메시지에 언급된 날짜를 뽑아 LocalDate로 돌려줍니다. 연도는 묻지 않은
     // 메시지뿐이라 항상 접속 시점의 연도를 씁니다 - 그 결과가 과거 날짜가 되더라도 상관없습니다(screenings
     // 테이블에 그 날짜의 회차가 없으면 answerDateScreeningQuestion이 "없습니다"로 답하므로, 날짜가 과거든
@@ -648,7 +695,9 @@ public class ChatService {
             return persistTurn(user, conversation, userMessage, reply, List.of());
         }
 
-        String titles = movies.stream().map(MovieSummaryDto::title).collect(Collectors.joining(", "));
+        // persistTurn이 포스터 카드는 항상 제목 가나다순으로 다시 정렬해서 보여주므로(바로 아래 참고),
+        // 이 문장 안의 제목 나열도 같은 순서여야 카드 순서와 안 맞는 문제가 없습니다(2026-10-14 실측).
+        String titles = movies.stream().map(MovieSummaryDto::title).sorted().collect(Collectors.joining(", "));
         String reply = "%s에 상영하는 영화는 총 %d편이에요: %s".formatted(formatDateLabel(date), movies.size(), titles);
         return persistTurn(user, conversation, userMessage, reply, movies);
     }
@@ -661,9 +710,24 @@ public class ChatService {
                     + "|[0-9]+\\s*(?:년|개월|달|주)\\s*(?:뒤|후)"
                     + "|[한두세네다섯여섯일이삼사오육칠팔구십]+\\s*(?:년|개월|달|주)\\s*(?:뒤|후)"
     );
-    // "지금"/"오늘"로 오늘을 가리키는 표현 - "내일"/"다음주"처럼 오늘이 아닌 날을 가리키는 단어는 당연히
-    // 포함하지 않습니다.
-    private static final java.util.regex.Pattern TODAY_HINT = java.util.regex.Pattern.compile("지금|오늘");
+    // "지금"/"오늘"/"금일"/"당일"로 오늘을 가리키는 표현 - "내일"/"다음주"처럼 오늘이 아닌 날을 가리키는
+    // 단어는 당연히 포함하지 않습니다. "금일"/"당일"은 "오늘"의 formal 동의어로, 2026-10-13 요청에 따라
+    // 완전히 동일하게 취급합니다.
+    private static final java.util.regex.Pattern TODAY_HINT = java.util.regex.Pattern.compile("지금|오늘|금일|당일");
+    // "어제"/"작일"/"전일"(둘 다 어제의 formal 동의어)로 어제를 가리키는 표현입니다. reply() 상단에서
+    // Gemini 호출 전에 PAST_SCREENING_REPLY로 바로 답하므로 여기선 패턴 매칭만 담당합니다.
+    private static final java.util.regex.Pattern YESTERDAY_HINT = java.util.regex.Pattern.compile("어제|작일|전일");
+    // "저번주"/"지난주"와 "저저번주"/"지지난주"(지난주보다 더 이전 주)로 과거의 주를 가리키는 표현입니다.
+    // 상영 스케줄 자체가 "이번 주"만 생성/보관되므로(screenings 테이블 주석 참고), 지난주 이전은 애초에
+    // DB에 조회할 데이터가 없습니다 - "저저번주"가 "저번주"의 부분 문자열은 아니지만(저+저번주) 혹시
+    // 모를 변형 표현에 대비해 둘 다 명시적으로 나열해둡니다(2026-10-14 요청).
+    private static final java.util.regex.Pattern LAST_WEEK_HINT = java.util.regex.Pattern.compile("저번\\s*주|지난\\s*주|저저번\\s*주|지지난\\s*주");
+    // "내일"/"명일"/"익일"(내일의 formal 동의어)로 내일을 가리키는 표현입니다. 상영 스케줄은 매주 월요일
+    // 자정 배치로 그 주 분량만 생성되므로, 오늘이 일요일이면 내일(다음주 월요일) 몫이 아직 없어
+    // answerDateScreeningQuestion이 자연히 NOT_YET_AVAILABLE_SCREENING_REPLY로 답하고, 그 외 요일이면
+    // 내일이 이미 생성된 이번 주 안의 날짜라 실제 DB 조회 결과를 그대로 답합니다 - 요일별 분기를 따로 둘
+    // 필요 없이 날짜 변환만 해주면 기존 로직이 두 경우를 모두 올바르게 처리합니다.
+    private static final java.util.regex.Pattern TOMORROW_HINT = java.util.regex.Pattern.compile("내일|명일|익일");
 
     // "다음주에 상영 예정인 영화 알려줘"처럼 특정 영화명 없이 "다음 주" 상영작을 물어본 질문에 답합니다.
     // 상영 스케줄은 매주 월요일 자정 배치로 그 주 분량만 미리 만들어지므로(screenings 테이블 주석 참고),
@@ -688,9 +752,80 @@ public class ChatService {
             return persistTurn(user, conversation, userMessage, NOT_YET_AVAILABLE_SCREENING_REPLY, List.of());
         }
 
-        String titles = movies.stream().map(MovieSummaryDto::title).collect(Collectors.joining(", "));
+        String titles = movies.stream().map(MovieSummaryDto::title).sorted().collect(Collectors.joining(", "));
         String reply = "다음주(%s~%s)에 상영 예정인 영화는 총 %d편이에요: %s"
                 .formatted(formatDateLabel(nextMonday), formatDateLabel(nextSunday), movies.size(), titles);
+        return persistTurn(user, conversation, userMessage, reply, movies);
+    }
+
+    // "주말"을 언급했지만 "다음"/"다다음"/"저번"/"저저번"/"지난"/"지지난" 중 하나가 바로 앞에 붙어 다른
+    // 주를 콕 집은 게 아니면(부정 lookbehind) "이번 주말"(채팅을 보낸 날짜가 속한 이번 주의 토/일)을
+    // 가리키는 걸로 봅니다. "주말에 상영하는 영화 알려줘"처럼 "상영"이 있는 경우뿐 아니라, 사이드바 빠른
+    // 답장 버튼 문구인 "이번 주말에 볼만한 영화 추천해줘"처럼 "상영"이 없는 경우도 잡아야 해서
+    // isPureScreeningQuery 조건으로만 게이트합니다(2026-10-14 요청).
+    private static final java.util.regex.Pattern THIS_WEEKEND_HINT = java.util.regex.Pattern.compile(
+            "(?<!다음\\s?)(?<!다다음\\s?)(?<!저번\\s?)(?<!저저번\\s?)(?<!지난\\s?)(?<!지지난\\s?)주말"
+    );
+
+    // "이번 주말에 볼만한 영화 추천해줘"처럼 "이번 주말"(채팅을 보낸 날짜가 속한 이번 주의 토/일)에
+    // 상영하는 영화를 물어본 질문에 답합니다. 일반 추천 파이프라인(KMDB 카탈로그 검색)으로 넘기면 날짜와
+    // 무관한 최신/인기작이 섞여 나오므로, answerNextWeekScreeningQuestion과 같은 방식으로 실제
+    // screenings 테이블을 토/일 날짜로 직접 조회해 답합니다. 이미 지난 회차는 answerDateScreeningQuestion
+    // 과 같은 기준(isUpcoming)으로 제외합니다.
+    private ChatResponseDto answerThisWeekendScreeningQuestion(User user, ChatConversation conversation, String userMessage) {
+        LocalDate today = LocalDate.now();
+        LocalDate thisMonday = today.minusDays(today.getDayOfWeek().getValue() - 1L);
+        LocalDate saturday = thisMonday.plusDays(5);
+        LocalDate sunday = thisMonday.plusDays(6);
+
+        List<String> movieIds = screeningRepository.findByDateBetweenOrderByDateAscStartTimeAsc(saturday, sunday).stream()
+                .filter(this::isUpcoming)
+                .map(Screening::getMovieId)
+                .distinct()
+                .toList();
+        List<MovieSummaryDto> movies = movieIds.stream()
+                .map(this::toSummaryOrNull)
+                .filter(java.util.Objects::nonNull)
+                .toList();
+        if (movies.isEmpty()) {
+            return persistTurn(user, conversation, userMessage, NOT_YET_AVAILABLE_SCREENING_REPLY, List.of());
+        }
+
+        String titles = movies.stream().map(MovieSummaryDto::title).sorted().collect(Collectors.joining(", "));
+        String reply = "이번 주말(%s~%s)에 상영하는 영화는 총 %d편이에요: %s"
+                .formatted(formatDateLabel(saturday), formatDateLabel(sunday), movies.size(), titles);
+        return persistTurn(user, conversation, userMessage, reply, movies);
+    }
+
+    // "11월에 상영하는 영화 알려줘"처럼 일(day) 없이 특정 월만 콕 집어 물어본 질문에 답합니다. 상영
+    // 스케줄은 매주 월요일 자정 배치로 그 주 분량만 미리 만들어지는 구조라(screenings 테이블 주석 참고),
+    // 다음 달/다다음 달처럼 아직 그 달의 어느 주도 생성되지 않았으면 항상 "아직 없다"로 답하고, 이번 달처럼
+    // 이미 일부(또는 전부) 생성돼 있으면 실제 screenings 테이블 기준으로 답합니다 - 미리 "먼 미래는 무조건
+    // 비어있다"고 가정하지 않고 매번 실제로 조회하므로, 나중에 생성 주기가 바뀌거나 미리 당겨 생성해두는
+    // 경우에도 항상 정확합니다. 언급한 월이 이미 올해 지난 달이면(예: 10월에 "3월" 질문) 내년 그 달을
+    // 가리키는 걸로 봅니다.
+    private ChatResponseDto answerMonthScreeningQuestion(User user, ChatConversation conversation, String userMessage, int month) {
+        LocalDate today = LocalDate.now();
+        int year = month >= today.getMonthValue() ? today.getYear() : today.getYear() + 1;
+        LocalDate monthStart = LocalDate.of(year, month, 1);
+        LocalDate monthEnd = monthStart.withDayOfMonth(monthStart.lengthOfMonth());
+
+        List<String> movieIds = screeningRepository.findByDateBetweenOrderByDateAscStartTimeAsc(monthStart, monthEnd).stream()
+                .filter(this::isUpcoming)
+                .map(Screening::getMovieId)
+                .distinct()
+                .toList();
+        List<MovieSummaryDto> movies = movieIds.stream()
+                .map(this::toSummaryOrNull)
+                .filter(java.util.Objects::nonNull)
+                .toList();
+        if (movies.isEmpty()) {
+            String reply = "%d월의 영화 및 영화 상영 정보는 아직 없습니다.".formatted(month);
+            return persistTurn(user, conversation, userMessage, reply, List.of());
+        }
+
+        String titles = movies.stream().map(MovieSummaryDto::title).sorted().collect(Collectors.joining(", "));
+        String reply = "%d월에 상영하는 영화는 총 %d편이에요: %s".formatted(month, movies.size(), titles);
         return persistTurn(user, conversation, userMessage, reply, movies);
     }
 
@@ -825,12 +960,18 @@ public class ChatService {
             User user, ChatConversation conversation, String userMessage, String reply,
             List<MovieSummaryDto> movies, SeatStatusDto seatStatus
     ) {
+        // AI 추천의 모든 응답이 여기 한 곳을 거쳐 나가므로, 영화 목록이 섞여 있으면 항상 제목 가나다
+        // (오름차순) 순으로 정렬해서 화면 카드 그리드에 일관된 순서로 보여줍니다(추천/찜 목록/시청완료
+        // 목록/리뷰 목록 등 응답 종류와 무관하게 전부 적용).
+        List<MovieSummaryDto> sortedMovies = movies.stream()
+                .sorted(java.util.Comparator.comparing(MovieSummaryDto::title))
+                .toList();
         Long screeningId = seatStatus == null ? null : seatStatus.screeningId();
         chatMessageRepository.save(new ChatMessage(user, conversation.getId(), "user", userMessage, null, null));
-        chatMessageRepository.save(new ChatMessage(user, conversation.getId(), "ai", reply, joinIds(movies), screeningId));
+        chatMessageRepository.save(new ChatMessage(user, conversation.getId(), "ai", reply, joinIds(sortedMovies), screeningId));
         conversation.touch();
         chatConversationRepository.save(conversation);
-        return new ChatResponseDto(conversation.getId(), reply, movies, seatStatus);
+        return new ChatResponseDto(conversation.getId(), reply, sortedMovies, seatStatus);
     }
 
     private String joinIds(List<MovieSummaryDto> movies) {
@@ -948,9 +1089,11 @@ public class ChatService {
                   풀어서 채워라(원문 띄어쓰기와 무관하게 "범죄도시"처럼 붙여 써라). "이 영화"/"그 영화"처럼
                   지시어뿐이거나 특정 제목이 없으면 빈 배열([]).
                 - targetAll: "모든/전부/싹 다" 류로 특정 제목 없이 전체를 가리켰으면 true(찜 전체 해제,
-                  시청완료 전체 삭제에서만 의미 있음). 특정 제목을 말했으면 false.
-                - targetMostRecent: "이 리뷰"/"방금 쓴 것"/"마지막 것"/"최근 본 영화"처럼 특정 제목 없이
-                  가장 최근 항목을 가리켰으면 true(리뷰 삭제, 시청완료 삭제에서만 의미 있음).
+                  리뷰 전체 삭제, 시청완료 전체 삭제에서만 의미 있음). 특정 제목을 말했으면 false.
+                - targetMostRecent: "이 리뷰"/"방금 쓴 것"/"마지막 것"/"최근 본 영화"처럼 가장 최근 항목을
+                  콕 집어 가리키는 말이 실제로 있을 때만 true(리뷰 삭제, 시청완료 삭제에서만 의미 있음).
+                  "리뷰 삭제해줘"처럼 제목도 없고 이런 지시어/recency 표현도 전혀 없으면, 무엇을 지울지
+                  추측하지 말고 false로 둬라(서버가 사용자에게 어떤 영화인지 되물어야 한다).
                 - reviewContent: review_add일 때 사용자가 적은 리뷰 본문 자유 텍스트(평점 숫자/"평점 N점"
                   표현은 제외하고 실제 감상평 문장만). 리뷰 본문이 없으면 null.
                 - genresToSet: genre_pref_update일 때 사용자가 선호 장르로 바꿔달라고 말한 장르들(배열,
@@ -979,6 +1122,9 @@ public class ChatService {
                   {"intent":"review_add","movieTitles":["퍼펙트 게임"],"reviewContent":"롯데의 최동원vs해태의 선동열"}
                 - "내가 쓴 모든 리뷰를 알려줘" -> {"intent":"review_list"}
                 - "방금 쓴 리뷰 삭제해줘" -> {"intent":"review_delete","movieTitles":[],"targetMostRecent":true}
+                - "모든 리뷰 내역을 삭제해줘" -> {"intent":"review_delete","movieTitles":[],"targetAll":true}
+                - "리뷰 삭제" (제목도, "방금"/"최근" 같은 지시어도 없음) ->
+                  {"intent":"review_delete","movieTitles":[],"targetAll":false,"targetMostRecent":false}
                 - "영화 OOO을 시청 완료 목록에 추가해줘" -> {"intent":"watched_add","movieTitles":["OOO"]}
                 - "내 모든 시청 완료 목록을 삭제해줘" -> {"intent":"watched_remove","movieTitles":[],"targetAll":true}
                 - "내 선호 장르 알려줘" -> {"intent":"genre_pref_view"}
@@ -1150,11 +1296,14 @@ public class ChatService {
         List<MovieSummaryDto> movies;
         if (filter.query() != null && filter.queryField() != null) {
             // Gemini가 "OOO 감독"처럼 대상이 뭔지 알려준 경우 - 엉뚱하게 title 검색이 먼저 걸려버리는 걸
-            // 막기 위해 굳이 다른 필드로 재시도하지 않고 지정된 필드만 그대로 씁니다.
-            movies = searchNonEmpty(filter.query(), genres, filter.year(), filter.queryField(), searchPageSize);
+            // 막기 위해 굳이 다른 필드로 재시도하지 않고 지정된 필드만 그대로 씁니다. title이면 사용자가
+            // 말한 제목과 완전히 같은 영화만 남깁니다(바로 아래 exactTitleSearch 설명 참고).
+            movies = "title".equals(filter.queryField())
+                    ? exactTitleSearch(filter.query(), genres, filter.year())
+                    : searchNonEmpty(filter.query(), genres, filter.year(), filter.queryField(), searchPageSize);
         } else if (filter.query() != null) {
             // 필드를 특정 못 했으면 title -> actor -> director 순으로 시도합니다.
-            movies = searchNonEmpty(filter.query(), genres, filter.year(), "title", searchPageSize);
+            movies = exactTitleSearch(filter.query(), genres, filter.year());
             if (movies.isEmpty()) {
                 movies = searchNonEmpty(filter.query(), genres, filter.year(), "actor", searchPageSize);
             }
@@ -1196,6 +1345,20 @@ public class ChatService {
         return movieService.search(query, genres, year, null, "latest", 1, pageSize, field).movies();
     }
 
+    // "범죄도시 추천해줘"처럼 영화 제목으로 추천을 요청하면, movie_question/pricing_info 등 다른 intent와
+    // 똑같이 사용자가 말한 제목과 완전히 같은 영화만 보여줘야 합니다. KMDB는 검색어를 형태소 단위로 쪼개
+    // 부분 일치시키고 MovieService도 "포함" 기준까지만 걸러주므로(필터링 없이 쓰면 제목에 검색어가 포함만
+    // 된 전혀 다른 영화까지 추천 목록에 섞여 나왔습니다 - 2026-10-14 실측), findExactTitleMatch와 같은
+    // 기준(titleMatches)으로 한 번 더 걸러 제목이 완전히 같은 영화만 남깁니다. 다만 findExactTitleMatch와
+    // 달리 동명이작(같은 제목의 리메이크/다른 연도 작품)이 있을 수 있어 첫 번째만 고르지 않고 전부
+    // 남기고, 검색 풀도 findExactTitleMatch와 같은 EXACT_TITLE_SEARCH_POOL(500건)까지 넉넉히 가져와야
+    // "latest" 정렬상 정확히 같은 제목의 영화가 뒤쪽에 있어도 놓치지 않습니다.
+    private List<MovieSummaryDto> exactTitleSearch(String referenceTitle, List<String> genres, String year) {
+        List<MovieSummaryDto> candidates =
+                movieService.search(referenceTitle, genres, year, null, "latest", 1, EXACT_TITLE_SEARCH_POOL, "title").movies();
+        return candidates.stream().filter(movie -> titleMatches(movie.title(), referenceTitle)).toList();
+    }
+
     private boolean matchesRuntime(MovieSummaryDto movie, Integer runtimeMaxMinutes) {
         if (runtimeMaxMinutes == null) {
             return true;
@@ -1207,7 +1370,10 @@ public class ChatService {
 
     private String buildReply(ExtractedFilter filter, List<MovieSummaryDto> candidates) {
         String condition = describeFilter(filter);
-        String titles = candidates.stream().map(MovieSummaryDto::title).collect(Collectors.joining(", "));
+        // persistTurn이 포스터 카드는 항상 제목 가나다순으로 다시 정렬해서 보여주므로(candidates 자체의
+        // 추천 순서는 그대로 두고), 이 문장 안의 제목 나열도 같은 순서여야 카드 순서와 안 맞는 문제가
+        // 없습니다(2026-10-14 실측).
+        String titles = candidates.stream().map(MovieSummaryDto::title).sorted().collect(Collectors.joining(", "));
         String suffix = candidates.size() > 1 ? "등 %d편을 찾았어요!".formatted(candidates.size()) : "을(를) 찾았어요!";
         String guide = "영화 포스터를 클릭하시면 자세한 영화 정보를 보실 수 있습니다.";
         // "지금 상영중인 영화 찾아줘"처럼 다른 조건 없이 상영중 제한만 있었으면, 예전 handleNowShowingRequest
@@ -1562,10 +1728,11 @@ public class ChatService {
         return persistTurn(user, conversation, userMessage, reply, movies);
     }
 
-    // "평점 4점", "별점 5", "별 3개", "평점-5"처럼 "평점/별점/별" 뒤에 붙은 숫자를 뽑아냅니다("-"/":" 구분자도
-    // 허용). 정수가 아니거나(3.3) 1~5 범위를 벗어나면(0, 6 등) 전부 INVALID로 봅니다 - 평점은 반드시
-    // 1,2,3,4,5 중 하나여야 합니다.
-    private static final java.util.regex.Pattern REVIEW_SCORE_HINT = java.util.regex.Pattern.compile("(?:평점|별점|별)\\s*[-:]?\\s*(\\d+(?:\\.\\d+)?)\\s*(?:점|개)?");
+    // "평점 4점", "별점 5", "별 3개", "평점-5", "평점=4"처럼 "평점/별점/별" 뒤에 붙은 숫자를 뽑아냅니다
+    // ("-"/":"/"=" 구분자도 허용 - "평점=4" 형식을 못 잡아 평점을 이미 입력했는데도 다시 물어보는 버그가
+    // 있었습니다, 2026-10-14 실측). 정수가 아니거나(3.3) 1~5 범위를 벗어나면(0, 6 등) 전부 INVALID로
+    // 봅니다 - 평점은 반드시 1,2,3,4,5 중 하나여야 합니다.
+    private static final java.util.regex.Pattern REVIEW_SCORE_HINT = java.util.regex.Pattern.compile("(?:평점|별점|별)\\s*[-:=]?\\s*(\\d+(?:\\.\\d+)?)\\s*(?:점|개)?");
     // 평점을 먼저 물어본 다음 턴처럼, 사용자가 "평점"이라는 단어 없이 숫자만(또는 "4점"처럼) 달랑 답하는
     // 경우를 위한 관대한 패턴입니다 - 메시지 전체가 숫자(+선택적 "점")뿐일 때만 매치합니다.
     private static final java.util.regex.Pattern REVIEW_BARE_SCORE = java.util.regex.Pattern.compile("^\\s*(\\d+(?:\\.\\d+)?)\\s*점?\\s*$");
@@ -1625,13 +1792,9 @@ public class ChatService {
         List<MovieSummaryDto> resolved = resolveNewMovieReferences(filter.movieTitles(), userMessage, fullHistory);
         MovieSummaryDto movie = !resolved.isEmpty() ? resolved.get(0) : (candidates.size() == 1 ? candidates.get(0) : null);
 
-        if (movie == null) {
-            String reply = candidates.isEmpty()
-                    ? "어떤 영화의 리뷰를 작성할지 먼저 영화를 찾아주시겠어요?"
-                    : "어떤 영화의 리뷰를 작성할지 제목으로 말씀해주시겠어요?";
-            return persistTurn(user, conversation, userMessage, reply, List.of());
-        }
-
+        // 영화명이 아직 안 정해졌어도(movie == null) 여기서 바로 되묻지 않고 resolveReviewDraft로
+        // 그대로 넘깁니다 - 평점/리뷰 내용도 같이 빠져 있을 수 있으므로, "영화명/평점/리뷰 내용" 중 빠진
+        // 항목을 전부 한 번에 모아서 답해야 합니다(2026-10-14 요청).
         // 평점은 Gemini가 아니라 지금처럼 엄격한 정규식으로 검증합니다 - Gemini는 "3.3"을 3으로 반올림해
         // 버릴 수 있어, "1~5 정수가 아니면 무조건 다시 묻는다"는 요구사항을 신뢰할 수 없게 만듭니다.
         ReviewScoreResult score = parseReviewScore(userMessage);
@@ -1639,37 +1802,47 @@ public class ChatService {
     }
 
     // 리뷰 내용/평점이 모일 때까지의 모든 상태 전환을 한 곳에서 처리합니다.
-    // - 평점이 입력됐지만 1~5 사이 정수가 아니면(3.3, 0, 7 등) 내용 유무와 상관없이 무조건 다시 묻습니다
-    //   (요청사항: "평점 정보는 1,2,3,4,5점 중에서만" - 이 경우는 절대 저장하지 않습니다).
-    // - 내용과 평점이 둘 다 있어야만 실제로 저장합니다. 하나라도 없으면 그 자리에서 저장하지 않고 남은
-    //   쪽만 콕 집어 되묻습니다(이미 받은 값은 안내 문구에 그대로 남겨서 다음 턴에 이어받습니다).
+    // - 평점이 입력됐지만 1~5 사이 정수가 아니면(3.3, 0, 7 등) 영화명/내용 유무와 상관없이 무조건 다시
+    //   묻습니다(요청사항: "평점 정보는 1,2,3,4,5점 중에서만" - 이 경우는 절대 저장하지 않습니다).
+    // - 영화명/평점/리뷰 내용이 전부 있어야만 실제로 저장합니다. 영화명이 이미 정해진 상태에서 평점/내용
+    //   중 딱 하나만 빠졌으면 기존처럼 그 하나만 콕 집어 되묻고(이미 받은 값은 안내 문구에 남겨 다음 턴에
+    //   이어받음 - pendingReviewState가 이 문구의 마커로 이어받습니다), 그 외(영화명 자체가 없거나 두 개
+    //   이상 빠졌으면)는 빠진 항목 이름을 전부 모아 한 번에 알려줍니다(2026-10-14 요청 - 영화명이 없으면
+    //   이어받을 영화 자체가 없어 다음 턴에서 처음부터 다시 받습니다).
     private ChatResponseDto resolveReviewDraft(
             User user, ChatConversation conversation, String userMessage, MovieSummaryDto movie,
             String content, ReviewScoreResult score
     ) {
         boolean hasContent = content != null && !content.isBlank();
+        boolean hasMovie = movie != null;
+        List<MovieSummaryDto> movieContext = hasMovie ? List.of(movie) : List.of();
 
         if (score.state() == ReviewScoreState.INVALID) {
             String reply = hasContent
                     ? "평점 정보를 1, 2, 3, 4, 5점 중에서 다시 입력해주세요. (리뷰 내용: \"%s\")".formatted(content)
                     : "평점 정보를 1, 2, 3, 4, 5점 중에서 다시 입력해주세요.";
-            return persistTurn(user, conversation, userMessage, reply, List.of(movie));
+            return persistTurn(user, conversation, userMessage, reply, movieContext);
         }
 
         boolean hasScore = score.state() == ReviewScoreState.VALID;
-        if (hasContent && hasScore) {
+        if (hasMovie && hasContent && hasScore) {
             return saveReview(user, conversation, userMessage, movie, content, score.value());
         }
-        if (hasContent) {
+        if (hasMovie && hasContent) {
             String reply = "평점 정보를 입력해주세요. (리뷰 내용: \"%s\")".formatted(content);
-            return persistTurn(user, conversation, userMessage, reply, List.of(movie));
+            return persistTurn(user, conversation, userMessage, reply, movieContext);
         }
-        if (hasScore) {
+        if (hasMovie && hasScore) {
             String reply = "리뷰 내용을 입력해주세요. (평점 %d점)".formatted(score.value());
-            return persistTurn(user, conversation, userMessage, reply, List.of(movie));
+            return persistTurn(user, conversation, userMessage, reply, movieContext);
         }
-        String reply = "'%s' 리뷰로 남길 내용과 평점(1, 2, 3, 4, 5점 중 하나)을 알려주세요.".formatted(movie.title());
-        return persistTurn(user, conversation, userMessage, reply, List.of(movie));
+
+        List<String> missing = new ArrayList<>();
+        if (!hasMovie) missing.add("영화명");
+        if (!hasScore) missing.add("평점");
+        if (!hasContent) missing.add("리뷰 내용");
+        String reply = "%s을(를) 입력해주세요.".formatted(String.join(", ", missing));
+        return persistTurn(user, conversation, userMessage, reply, movieContext);
     }
 
     private enum PendingReviewState { NONE, AWAITING_SCORE, AWAITING_CONTENT }
@@ -1743,9 +1916,10 @@ public class ChatService {
         return persistTurn(user, conversation, userMessage, reply, movies);
     }
 
-    // reviewService.listByUser는 최신순(findByUserIdOrderByCreatedAtDesc)이라, 특정 제목 언급 없이
-    // "이 리뷰"/"방금 쓴 리뷰"처럼 최근 것을 가리키면(filter.targetMostRecent()) 0번째(가장 최근) 리뷰를
-    // 가리키는 걸로 봅니다. 리뷰는 "전체 삭제"가 지원된 적이 없던 기능이라 targetAll은 쓰지 않습니다.
+    // reviewService.listByUser는 최신순(findByUserIdOrderByCreatedAtDescIdDesc)이라, 특정 제목 언급 없이
+    // "이 리뷰"/"방금 쓴 리뷰"처럼 최근 것을 가리키면(filter.targetMostRecent()) 0번째(가장 최근) 리뷰를,
+    // "모든 리뷰 내역을 삭제해줘"처럼 전체를 가리키면(filter.targetAll()) 작성한 리뷰 전부를 가리키는
+    // 걸로 봅니다(2026-10-14 요청 - 예전엔 targetAll을 무시해 전체 삭제가 항상 실패했습니다).
     private ChatResponseDto handleReviewDeleteRequest(User user, ChatConversation conversation, String userMessage, ExtractedFilter filter) {
         List<ReviewDto> reviews = reviewService.listByUser(user.getId());
         if (reviews.isEmpty()) {
@@ -1753,8 +1927,12 @@ public class ChatService {
             return persistTurn(user, conversation, userMessage, reply, List.of());
         }
 
+        // "모든 리뷰 내역을 삭제해줘"처럼 특정 제목 없이 전체를 가리켰으면(filter.targetAll()) 작성한
+        // 리뷰 전부를 대상으로 합니다 - 예전엔 이 값을 무시하고 항상 false로 넘겨서, 제목 매칭이 안 되면
+        // targetMostRecent만 확인하고 바로 "어떤 영화인지" 되묻는 메시지로 빠지는 버그가 있었습니다
+        // (2026-10-14 실측/요청).
         List<ReviewDto> matched = matchAgainstOwnList(
-                userMessage, false, Boolean.TRUE.equals(filter.targetMostRecent()), reviews, ReviewDto::movieTitle);
+                userMessage, Boolean.TRUE.equals(filter.targetAll()), Boolean.TRUE.equals(filter.targetMostRecent()), reviews, ReviewDto::movieTitle);
 
         if (matched.isEmpty()) {
             String reply = "어떤 영화의 리뷰를 삭제할지 제목으로 말씀해주시겠어요? (작성하신 리뷰: %s)"
@@ -1938,7 +2116,7 @@ public class ChatService {
         List<Seat> seats = seatRepository.findByScreeningIdOrderByRowLabelAscColNoAsc(screening.getId());
         int totalSeats = seats.size();
         int bookedSeats = (int) seats.stream().filter(seat -> seat.getStatus() == SeatStatus.BOOKED).count();
-        List<SeatDto> seatDtos = seats.stream().map(seat -> SeatDto.from(seat, false)).toList();
+        List<SeatDto> seatDtos = seats.stream().map(seat -> SeatDto.from(seat, null, false)).toList();
 
         return new SeatStatusDto(
                 screening.getId(),

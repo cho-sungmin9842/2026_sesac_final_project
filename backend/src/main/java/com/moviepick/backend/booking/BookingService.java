@@ -13,7 +13,6 @@ import com.moviepick.backend.screening.Screening;
 import com.moviepick.backend.screening.ScreeningRepository;
 import com.moviepick.backend.screening.Seat;
 import com.moviepick.backend.screening.SeatRepository;
-import com.moviepick.backend.screening.SeatStatus;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -93,17 +92,21 @@ public class BookingService {
             throw new ApiException("존재하지 않는 좌석이 포함되어 있습니다.", HttpStatus.BAD_REQUEST);
         }
 
-        Set<String> alreadyBooked = new LinkedHashSet<>();
+        // isAvailableFor: 진짜 AVAILABLE이거나, 지연만료로 사실상 AVAILABLE이거나, 내가 이미 선점
+        // (HOLD)해둔 좌석이면 예매할 수 있습니다 - 결제 전 좌석 선택 단계에서 이미 SeatHoldService로
+        // 선점해뒀을 테니, 정상 플로우라면 거의 항상 통과합니다(2026-10-14 좌석 선점 기능 추가).
+        Set<String> unavailable = new LinkedHashSet<>();
         for (Seat seat : seats) {
             if (!seat.getScreeningId().equals(request.screeningId())) {
                 throw new ApiException("다른 상영의 좌석이 포함되어 있습니다.", HttpStatus.BAD_REQUEST);
             }
-            if (seat.getStatus() == SeatStatus.BOOKED) {
-                alreadyBooked.add(seat.getRowLabel() + seat.getColNo());
+            if (!seat.isAvailableFor(userId)) {
+                unavailable.add(seat.getRowLabel() + seat.getColNo());
             }
         }
-        if (!alreadyBooked.isEmpty()) {
-            throw new ApiException("이미 예약된 좌석입니다: " + String.join(", ", alreadyBooked), HttpStatus.CONFLICT);
+        if (!unavailable.isEmpty()) {
+            throw new ApiException(
+                    "이미 예약되었거나 다른 사용자가 선택 중인 좌석입니다: " + String.join(", ", unavailable), HttpStatus.CONFLICT);
         }
 
         List<BookingSeat> bookingSeats = assignCategories(request.seatIds(), request.ticketCounts(), seats.size());
@@ -219,8 +222,9 @@ public class BookingService {
         if (!toSeat.getScreeningId().equals(booking.getScreeningId())) {
             throw new ApiException("다른 상영의 좌석으로는 변경할 수 없습니다.", HttpStatus.BAD_REQUEST);
         }
-        if (toSeat.getStatus() == SeatStatus.BOOKED) {
-            throw new ApiException("이미 예약된 좌석입니다: " + toSeat.getRowLabel() + toSeat.getColNo(), HttpStatus.CONFLICT);
+        if (!toSeat.isAvailableFor(userId)) {
+            throw new ApiException(
+                    "이미 예약되었거나 다른 사용자가 선택 중인 좌석입니다: " + toSeat.getRowLabel() + toSeat.getColNo(), HttpStatus.CONFLICT);
         }
 
         if (!booking.replaceSeat(request.fromSeatId(), request.toSeatId())) {
@@ -268,7 +272,7 @@ public class BookingService {
 
         releaseSeats(booking);
         bookingRepository.delete(booking);
-        notificationService.notifyBookingCancelled(booking.getUser(), bookingSummary(dto));
+        notificationService.notifyBookingCancelled(booking.getUser(), bookingSummary(dto), dto.totalPrice());
     }
 
     // 회원 탈퇴 시 UserService가 사용자 행을 지우기 "전에" 호출합니다. 좌석만 풀어주고 예매 행을 세션에

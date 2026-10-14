@@ -44,8 +44,15 @@ public class ScreeningGenerationService {
     private static final LocalTime DAY_START = LocalTime.of(8, 0);
     private static final LocalTime DAY_END = LocalTime.of(23, 0);
     private static final long TOTAL_OPERATING_MINUTES = Duration.between(DAY_START, DAY_END).toMinutes();
-    // 한 회차가 끝난 뒤 다음 회차 전까지 정리시간으로 비워두는 시간(분).
-    private static final int CLEANUP_MINUTES = 20;
+    // 한 회차가 끝난 뒤 다음 회차 전까지 정리시간으로 비워두는 시간(분). 상영관이 2개뿐이라(총 1,800분/일)
+    // "상영중"인 영화가 많은 날은(이번 주 최대 16편·총 상영시간 1,680분) 정리시간이 조금만 길어도 전부
+    // 다 못 돌리는 영화가 생깁니다(2026-10-14 실측 - 20분 기준으로 "철들 무렵"이 하루 통째로 빠짐). "상영중인
+    // 영화는 매일 최소 1회는 반드시 상영"을 더 안정적으로 지키기 위해 5분으로 줄였습니다 - generateForDay의
+    // 배치 순서 개선(러닝타임 긴 영화부터 채우기)과 함께 적용해야 여유 시간이 빠듯한 날에도 실제로 전부
+    // 들어갑니다(정리시간만 줄이고 순서를 그대로 두면, 빈틈 없이 꽉 채우는 방식이 아니라 그냥 순서대로
+    // 욱여넣는 방식이라 약간의 여유가 있어도 들어맞지 않을 수 있습니다 - 10/12 정리시간 20분·여유 16분일
+    // 때도 1편이 빠졌던 사례로 확인).
+    private static final int CLEANUP_MINUTES = 5;
     // 한 영화가 하루에(1관+2관 합산) 상영될 수 있는 최대 횟수.
     private static final int MAX_SHOWS_PER_MOVIE_PER_DAY = 4;
     // KMDB에 러닝타임 정보가 없는 영화에 쓰는 기본값(분).
@@ -191,8 +198,11 @@ public class ScreeningGenerationService {
     }
 
     private boolean fitsAtLeastOneShow(MovieSummaryDto movie) {
-        int runtime = movie.runtimeMinutes() != null ? movie.runtimeMinutes() : DEFAULT_RUNTIME_MINUTES;
-        return runtime + CLEANUP_MINUTES <= TOTAL_OPERATING_MINUTES;
+        return effectiveRuntimeMinutes(movie) + CLEANUP_MINUTES <= TOTAL_OPERATING_MINUTES;
+    }
+
+    private int effectiveRuntimeMinutes(MovieSummaryDto movie) {
+        return movie.runtimeMinutes() != null ? movie.runtimeMinutes() : DEFAULT_RUNTIME_MINUTES;
     }
 
     // 하루치 상영관 시간표를 처음부터 채웁니다(요일별로 독립적 - 전날 상태를 이어받지 않음).
@@ -211,11 +221,19 @@ public class ScreeningGenerationService {
         // 항상 늦은 시간에 배정되어 "같은 영화가 매일 같은 시작 시각"에 상영되는 문제가 생깁니다. 요일마다
         // 채우는 순서 자체를 돌려서(회전) 동률일 때의 우선순위를 날마다 다르게 깨고, 그 위에 이번 주 상영
         // 횟수가 적은 영화를 우선하는 정렬을 더합니다(용량이 모자란 날엔 아직 한 번도 못 돈 영화가 항상
-        // 먼저 배정되어야 하므로). 결과적으로 같은 영화도 날짜가 바뀌면 그날 몇 번째로 배정되는지가 달라져
-        // 상영 시작 시각도 날마다 달라집니다.
+        // 먼저 배정되어야 하므로).
+        // 세 번째 기준으로 러닝타임이 긴 영화부터 채웁니다(2026-10-14 요청 - "상영중인 영화는 매일 최소
+        // 1회는 반드시 상영"을 더 안정적으로 지키기 위함). 순서대로 그냥 욱여넣기만 하면(최적의 빈 틈
+        // 채우기가 아니라서) 총 여유 시간이 있어도 특정 영화 하나가 빠지는 경우가 실제로 있었습니다(10/12,
+        // 정리시간 20분 기준 여유 16분이었는데도 1편 누락). 긴 영화를 먼저 배정해야 짧은 영화들이 그 뒤에
+        // 남는 자투리 시간을 효율적으로 채워, 같은 여유 시간 안에서도 전부 들어갈 확률이 크게 높아집니다
+        // (Longest-Processing-Time 빈 패킹 방식). 이 세 번째 기준이 추가되면서 같은 주 상영 횟수·같은
+        // 러닝타임인 영화끼리만 날짜별 회전(rotated)이 순서를 가릅니다.
         List<MovieSummaryDto> rotated = new ArrayList<>(movies);
         Collections.rotate(rotated, dayIndex);
-        rotated.sort(Comparator.comparingInt(movie -> weeklyShowCount.getOrDefault(movie.id(), 0)));
+        rotated.sort(Comparator
+                .comparingInt((MovieSummaryDto movie) -> weeklyShowCount.getOrDefault(movie.id(), 0))
+                .thenComparing(Comparator.comparingInt(this::effectiveRuntimeMinutes).reversed()));
 
         // 위 회전/정렬로 "어느 영화가 먼저 배정되는지"는 매일 달라지지만, 각 상영관의 첫 회차는 항상
         // 고정된 DAY_START(08:00)에서 시작하므로 "그날 1번째로 배정된 영화"는 요일이 달라도 똑같이
@@ -264,7 +282,7 @@ public class ScreeningGenerationService {
             List<Theater> theaters, Map<Long, LocalTime> theaterCursor, Map<String, Integer> showsToday,
             MovieSummaryDto movie, LocalDate date, int theaterStart
     ) {
-        int runtime = movie.runtimeMinutes() != null ? movie.runtimeMinutes() : DEFAULT_RUNTIME_MINUTES;
+        int runtime = effectiveRuntimeMinutes(movie);
 
         for (int i = 0; i < theaters.size(); i++) {
             Theater theater = theaters.get((theaterStart + i) % theaters.size());
