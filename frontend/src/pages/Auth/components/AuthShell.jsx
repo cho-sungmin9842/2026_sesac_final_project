@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom'
 
-const FEATURES = ['AI 줄거리 요약 · 스포일러 방지', '대화형 AI 추천 챗봇', '나만의 찜 목록과 리뷰 기록']
+const FEATURES = ['AI 줄거리 요약', '대화형 AI 챗봇', '실시간 좌석 선택 · 간편 예매', '나만의 찜 목록과 리뷰 기록']
 
 function AuthShell({ mode, tagline, children }) {
   return (

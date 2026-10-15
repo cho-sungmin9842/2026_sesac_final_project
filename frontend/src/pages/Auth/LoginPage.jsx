@@ -58,7 +58,7 @@ function LoginPage() {
     }`
 
   return (
-    <AuthShell mode="login" tagline="당신의 취향을 배우는 AI와 함께, 오늘 볼 영화를 가장 빠르게 찾아보세요">
+    <AuthShell mode="login" tagline="정보 탐색부터 예매까지, AI 하나로 끝내세요">
       <form onSubmit={handleSubmit} noValidate className="space-y-4">
         <div>
           <label htmlFor="username" className="mb-1 block text-sm font-medium text-slate-700">
