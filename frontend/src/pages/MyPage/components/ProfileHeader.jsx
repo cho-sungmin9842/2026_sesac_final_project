@@ -1,10 +1,10 @@
 function ProfileHeader({ user, onChangePassword, onDeleteAccount }) {
   return (
-    <div className="flex items-center justify-between border-b border-white/5 pb-6">
+    <div className="flex flex-col gap-4 border-b border-white/5 pb-6 sm:flex-row sm:items-center sm:justify-between">
       <div className="flex items-center gap-4">
-        <span className="block h-16 w-16 rounded-full bg-gradient-to-br from-orange-400 to-red-500" />
-        <div>
-          <div className="flex items-center gap-2">
+        <span className="block h-16 w-16 shrink-0 rounded-full bg-gradient-to-br from-orange-400 to-red-500" />
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
             <h1 className="text-lg font-bold text-white">{user.nickname} 님</h1>
             <button
               type="button"
@@ -23,7 +23,7 @@ function ProfileHeader({ user, onChangePassword, onDeleteAccount }) {
         </div>
       </div>
 
-      <div className="flex gap-8 text-center">
+      <div className="flex gap-4 text-center sm:gap-8">
         <div>
           <p className="text-xl font-bold text-white">{user.bookingCount}</p>
           <p className="text-xs text-gray-400">예매</p>

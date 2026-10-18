@@ -25,44 +25,48 @@ function AdminSeatMap({ seats }) {
         <span className="text-sm font-bold tracking-[0.4em] text-white">SCREEN</span>
       </div>
 
-      <div className="flex flex-col items-center gap-1.5">
-        <div className="flex items-center gap-1.5">
-          <span className="w-4" />
-          {Array.from({ length: colCount }, (_, i) => i + 1).map((colNo) => {
-            const isBlockStart = colNo !== 1 && (colNo === EDGE_BLOCK_SIZE + 1 || colNo === colCount - EDGE_BLOCK_SIZE + 1)
-            return (
-              <span
-                key={colNo}
-                className={`flex h-5 w-5 items-center justify-center text-[10px] text-gray-500 ${isBlockStart ? 'ml-4' : ''}`}
-              >
-                {colNo}
-              </span>
-            )
-          })}
-        </div>
-        {rows.map((row) => (
-          <div key={row} className="flex items-center gap-1.5">
-            <span className="w-4 text-xs text-gray-500">{row}</span>
-            {seatsByRow[row].map((seat) => {
-              const isReserved = seat.status === 'BOOKED'
-              const isAccessible = seat.seatType === 'WHEELCHAIR'
-              const label = `${seat.rowLabel}${seat.colNo}`
-              const isBlockStart =
-                seat.colNo !== 1 && (seat.colNo === EDGE_BLOCK_SIZE + 1 || seat.colNo === colCount - EDGE_BLOCK_SIZE + 1)
-
+      {/* 열 수(14)×좌석 크기+통로 간격을 합치면 모바일 화면 폭보다 넓어질 수 있어, 이 영역만 가로
+          스크롤되게 감싸둡니다 - 안 그러면 이 좌석판 때문에 페이지 전체가 옆으로 밀립니다. */}
+      <div className="overflow-x-auto">
+        <div className="flex w-fit flex-col items-center gap-1.5">
+          <div className="flex items-center gap-1.5">
+            <span className="w-4" />
+            {Array.from({ length: colCount }, (_, i) => i + 1).map((colNo) => {
+              const isBlockStart = colNo !== 1 && (colNo === EDGE_BLOCK_SIZE + 1 || colNo === colCount - EDGE_BLOCK_SIZE + 1)
               return (
                 <span
-                  key={seat.id}
-                  aria-label={isAccessible ? `${label} (장애인석)` : label}
-                  title={label}
-                  // select-none: 읽기 전용 현황판이라 클릭해도 아무 동작이 없는데, 빈 inline 요소라
-                  // 클릭할 때 브라우저가 텍스트 선택 커서(흰색 "|")를 보여주는 문제가 있었습니다.
-                  className={`h-5 w-5 select-none rounded-sm ${seatClassName(isReserved, isAccessible)} ${isBlockStart ? 'ml-4' : ''}`}
-                />
+                  key={colNo}
+                  className={`flex h-5 w-5 items-center justify-center text-[10px] text-gray-500 ${isBlockStart ? 'ml-4' : ''}`}
+                >
+                  {colNo}
+                </span>
               )
             })}
           </div>
-        ))}
+          {rows.map((row) => (
+            <div key={row} className="flex items-center gap-1.5">
+              <span className="w-4 text-xs text-gray-500">{row}</span>
+              {seatsByRow[row].map((seat) => {
+                const isReserved = seat.status === 'BOOKED'
+                const isAccessible = seat.seatType === 'WHEELCHAIR'
+                const label = `${seat.rowLabel}${seat.colNo}`
+                const isBlockStart =
+                  seat.colNo !== 1 && (seat.colNo === EDGE_BLOCK_SIZE + 1 || seat.colNo === colCount - EDGE_BLOCK_SIZE + 1)
+
+                return (
+                  <span
+                    key={seat.id}
+                    aria-label={isAccessible ? `${label} (장애인석)` : label}
+                    title={label}
+                    // select-none: 읽기 전용 현황판이라 클릭해도 아무 동작이 없는데, 빈 inline 요소라
+                    // 클릭할 때 브라우저가 텍스트 선택 커서(흰색 "|")를 보여주는 문제가 있었습니다.
+                    className={`h-5 w-5 select-none rounded-sm ${seatClassName(isReserved, isAccessible)} ${isBlockStart ? 'ml-4' : ''}`}
+                  />
+                )
+              })}
+            </div>
+          ))}
+        </div>
       </div>
 
       <div className="mt-6 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-xs text-gray-400">

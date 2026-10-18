@@ -22,7 +22,9 @@ export function holdSeat(screeningId, seatId, userId) {
 }
 
 // 좌석 선택을 해제하거나 화면을 벗어날 때 호출하는 best-effort 해제입니다 - 내가 선점한 좌석이
-// 아니면(이미 해제/만료/다른 사람 것) 서버가 조용히 아무 일도 하지 않습니다.
-export function releaseSeatHold(screeningId, seatId, userId) {
-  return request(`/api/screenings/${screeningId}/seats/${seatId}/hold`, { method: 'DELETE', userId })
+// 아니면(이미 해제/만료/다른 사람 것) 서버가 조용히 아무 일도 하지 않습니다. keepalive=true로 넘기면
+// 브라우저 주소창 이동/새로고침/탭 닫기처럼 페이지 자체가 사라지는 순간에도 이 요청만은 보내지도록
+// 합니다(BookingSeatPage의 beforeunload/pagehide 핸들러가 씁니다).
+export function releaseSeatHold(screeningId, seatId, userId, keepalive = false) {
+  return request(`/api/screenings/${screeningId}/seats/${seatId}/hold`, { method: 'DELETE', userId, keepalive })
 }

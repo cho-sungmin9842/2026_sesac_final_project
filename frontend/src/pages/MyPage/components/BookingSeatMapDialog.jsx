@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { getScreeningSeats } from '../../../api/screeningApi'
 import { changeBookingSeat } from '../../../api/bookingApi'
+import ConfirmDialog from '../../../components/common/ConfirmDialog'
+import InfoDialog from '../../../components/common/InfoDialog'
 
 const EDGE_BLOCK_SIZE = 3
 
@@ -30,6 +32,8 @@ function BookingSeatMapDialog({ booking, userId, onClose, onSeatChanged }) {
   const [status, setStatus] = useState('loading') // loading | ready | error
   const [selectedSeatId, setSelectedSeatId] = useState(null)
   const [isChanging, setIsChanging] = useState(false)
+  const [pendingWheelchairSeat, setPendingWheelchairSeat] = useState(null)
+  const [errorMessage, setErrorMessage] = useState('')
 
   // 다이얼로그가 열려있는 동안 좌석변경에 성공한 뒤 최신 상태로 다시 불러올 때도 재사용합니다. silent가
   // true면(주기적 폴링용) 화면을 "불러오는 중..."으로 되돌리지 않고 좌석 데이터만 조용히 갱신합니다.
@@ -79,10 +83,14 @@ function BookingSeatMapDialog({ booking, userId, onClose, onSeatChanged }) {
     // 예매 화면의 좌석 선택(BookingSeatPage.jsx)과 동일하게, 장애인석(A열)으로 옮기는 경우에는
     // 실수로 누른 게 아닌지 한 번 더 확인합니다.
     if (seat.seatType === 'WHEELCHAIR') {
-      const confirmed = window.confirm('장애인석을 선택했습니다.\n장애인석을 선택하시겠습니까?')
-      if (!confirmed) return
+      setPendingWheelchairSeat(seat)
+      return
     }
 
+    await performSeatChange(seat)
+  }
+
+  const performSeatChange = async (seat) => {
     setIsChanging(true)
     try {
       await changeBookingSeat(userId, booking.id, { fromSeatId: selectedSeatId, toSeatId: seat.id })
@@ -90,10 +98,16 @@ function BookingSeatMapDialog({ booking, userId, onClose, onSeatChanged }) {
       await loadSeats()
       onSeatChanged?.()
     } catch (error) {
-      window.alert(error.message)
+      setErrorMessage(error.message)
     } finally {
       setIsChanging(false)
     }
+  }
+
+  const confirmWheelchairSeat = () => {
+    const seat = pendingWheelchairSeat
+    setPendingWheelchairSeat(null)
+    performSeatChange(seat)
   }
 
   const rows = [...new Set(seats.map((seat) => seat.rowLabel))].sort()
@@ -191,6 +205,19 @@ function BookingSeatMapDialog({ booking, userId, onClose, onSeatChanged }) {
           </>
         )}
       </div>
+
+      {pendingWheelchairSeat && (
+        <ConfirmDialog
+          title="장애인석 선택"
+          message={'장애인석을 선택했습니다.\n장애인석을 선택하시겠습니까?'}
+          onConfirm={confirmWheelchairSeat}
+          onCancel={() => setPendingWheelchairSeat(null)}
+        />
+      )}
+
+      {errorMessage && (
+        <InfoDialog title="좌석 변경 실패" message={errorMessage} tone="error" onClose={() => setErrorMessage('')} />
+      )}
     </div>
   )
 }

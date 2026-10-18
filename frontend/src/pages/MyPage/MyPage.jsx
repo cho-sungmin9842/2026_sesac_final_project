@@ -17,6 +17,8 @@ import ProfileHeader from './components/ProfileHeader'
 import BookingSeatMapDialog from './components/BookingSeatMapDialog'
 import ChangePasswordDialog from './components/ChangePasswordDialog'
 import DeleteAccountDialog from './components/DeleteAccountDialog'
+import ConfirmDialog from '../../components/common/ConfirmDialog'
+import InfoDialog from '../../components/common/InfoDialog'
 
 const TABS = ['예매 내역', '내가 쓴 리뷰', '찜한 영화', '시청완료']
 
@@ -430,13 +432,21 @@ function MyPage() {
   const handleChangePassword = ({ currentPassword, newPassword }) =>
     changePassword(user.id, { currentPassword, newPassword })
 
-  const handleCancelBooking = async (booking) => {
-    if (!window.confirm('이 예매를 취소하시겠습니까? 취소하면 되돌릴 수 없습니다.')) return
+  const [pendingCancelBooking, setPendingCancelBooking] = useState(null)
+  const [cancelErrorMessage, setCancelErrorMessage] = useState('')
+
+  const handleCancelBooking = (booking) => {
+    setPendingCancelBooking(booking)
+  }
+
+  const confirmCancelBooking = async () => {
+    const booking = pendingCancelBooking
+    setPendingCancelBooking(null)
     try {
       await cancelBooking(user.id, booking.id)
       refreshBookings()
     } catch (error) {
-      window.alert(error.message)
+      setCancelErrorMessage(error.message)
     }
   }
 
@@ -525,13 +535,13 @@ function MyPage() {
         saving={savingGenres}
       />
 
-      <div className="mt-8 flex gap-6 border-b border-white/5 text-sm font-medium text-gray-400">
+      <div className="mt-8 flex gap-6 overflow-x-auto border-b border-white/5 text-sm font-medium text-gray-400">
         {TABS.map((tab) => (
           <button
             key={tab}
             type="button"
             onClick={() => setActiveTab(tab)}
-            className={`-mb-px border-b-2 pb-3 ${
+            className={`-mb-px shrink-0 whitespace-nowrap border-b-2 pb-3 ${
               activeTab === tab
                 ? 'border-indigo-500 text-white'
                 : 'border-transparent hover:text-gray-200'
@@ -592,6 +602,21 @@ function MyPage() {
           onClose={() => setSeatMapBooking(null)}
           onSeatChanged={refreshBookings}
         />
+      )}
+
+      {pendingCancelBooking && (
+        <ConfirmDialog
+          title="예매 취소"
+          message={'이 예매를 취소하시겠습니까?\n취소하면 되돌릴 수 없습니다.'}
+          confirmLabel="취소하기"
+          danger
+          onConfirm={confirmCancelBooking}
+          onCancel={() => setPendingCancelBooking(null)}
+        />
+      )}
+
+      {cancelErrorMessage && (
+        <InfoDialog title="예매 취소 실패" message={cancelErrorMessage} tone="error" onClose={() => setCancelErrorMessage('')} />
       )}
     </div>
   )

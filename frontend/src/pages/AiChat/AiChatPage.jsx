@@ -240,7 +240,7 @@ function AiChatPage() {
 
       <div className="flex min-w-0 flex-1 flex-col">
         <div className="mb-3 flex items-center justify-between">
-          <h1 className="text-lg font-bold text-gray-100">AI 추천</h1>
+          <h1 className="text-lg font-bold text-gray-100">AI 챗봇</h1>
           <button
             type="button"
             onClick={handleNewConversation}

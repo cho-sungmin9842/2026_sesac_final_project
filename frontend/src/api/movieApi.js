@@ -98,3 +98,24 @@ export async function getFirstMatches(titles) {
 export function getPopularMovies(minScore = 4, limit = 6) {
   return request(`/api/movies/popular?minScore=${minScore}&limit=${limit}`)
 }
+
+/**
+ * 헤더 검색창 자동완성(제목 전용) 후보. 캐시된 제목만 바로 조회해 즉시 응답됩니다.
+ * 응답 형태: [{ id, title, year, posterUrl }]
+ */
+export function getMovieSuggestions(query, limit = 5) {
+  if (!query || !query.trim()) return Promise.resolve([])
+  return request(`/api/movies/suggestions?query=${encodeURIComponent(query.trim())}&limit=${limit}`)
+}
+
+/**
+ * 헤더 검색창 자동완성(배우/감독 전용) 후보 - 영화 제목이 아니라 "사람 이름"만 돌려줍니다.
+ * KMDB를 직접(소량만) 조회하므로 제목 자동완성보다는 조금 더 걸리지만, 디바운스(Header.jsx)와
+ * 함께 타이핑 중에 호출해도 괜찮은 수준입니다. 응답 형태: ["마동석", "마동석 (가명)", ...]
+ */
+export function getPersonSuggestions(query, field, limit = 5) {
+  if (!query || !query.trim()) return Promise.resolve([])
+  return request(
+    `/api/movies/person-suggestions?query=${encodeURIComponent(query.trim())}&field=${field}&limit=${limit}`,
+  )
+}

@@ -115,7 +115,7 @@ function LoginPage() {
         </button>
 
         <p className="pt-2 text-center text-xs text-slate-500">
-          관리자 계정으로 로그인하면 자동으로 관리자 대시보드로 이동합니다.
+          관리자 계정으로 로그인하면 자동으로 관리자 화면으로 이동합니다.
         </p>
       </form>
 

@@ -16,6 +16,7 @@ import AdminMembersPage from './pages/Admin/AdminMembersPage'
 import AdminScreeningsPage from './pages/Admin/AdminScreeningsPage'
 import LoginPage from './pages/Auth/LoginPage'
 import SignupPage from './pages/Auth/SignupPage'
+import NotFoundPage from './pages/NotFound/NotFoundPage'
 import RequireAuth from './auth/RequireAuth'
 
 function App() {
@@ -42,6 +43,7 @@ function App() {
           <Route path="/payment/success" element={<PaymentSuccessPage />} />
           <Route path="/payment/fail" element={<PaymentFailPage />} />
           <Route path="/mypage" element={<MyPage />} />
+          <Route path="*" element={<NotFoundPage />} />
         </Route>
 
         <Route

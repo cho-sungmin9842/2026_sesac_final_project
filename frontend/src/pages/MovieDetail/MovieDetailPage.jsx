@@ -12,6 +12,8 @@ import ReviewList from './components/ReviewList'
 import StillGallery from './components/StillGallery'
 import WriteReviewDialog from './components/WriteReviewDialog'
 import { normalizeDetail } from './normalizeDetail'
+import ConfirmDialog from '../../components/common/ConfirmDialog'
+import InfoDialog from '../../components/common/InfoDialog'
 
 function MovieDetailPage() {
   const { id } = useParams()
@@ -24,6 +26,8 @@ function MovieDetailPage() {
   const [isDialogOpen, setDialogOpen] = useState(false)
   const [editingReview, setEditingReview] = useState(null)
   const [watched, setWatched] = useState(false)
+  const [pendingDeleteReview, setPendingDeleteReview] = useState(null)
+  const [deleteErrorMessage, setDeleteErrorMessage] = useState('')
 
   const wishlisted = wishlistedIds.has(id)
 
@@ -88,13 +92,18 @@ function MovieDetailPage() {
     setDialogOpen(true)
   }
 
-  const handleReviewDelete = async (review) => {
-    if (!window.confirm('이 리뷰를 삭제할까요?')) return
+  const handleReviewDelete = (review) => {
+    setPendingDeleteReview(review)
+  }
+
+  const confirmReviewDelete = async () => {
+    const review = pendingDeleteReview
+    setPendingDeleteReview(null)
     try {
       await deleteReview(id, review.id, user.id)
       setReviews(await getReviews(id))
     } catch (error) {
-      window.alert(error.message)
+      setDeleteErrorMessage(error.message)
     }
   }
 
@@ -233,6 +242,21 @@ function MovieDetailPage() {
           onSubmit={handleReviewSubmit}
           onClose={closeDialog}
         />
+      )}
+
+      {pendingDeleteReview && (
+        <ConfirmDialog
+          title="리뷰 삭제"
+          message="이 리뷰를 삭제할까요?"
+          confirmLabel="삭제"
+          danger
+          onConfirm={confirmReviewDelete}
+          onCancel={() => setPendingDeleteReview(null)}
+        />
+      )}
+
+      {deleteErrorMessage && (
+        <InfoDialog title="리뷰 삭제 실패" message={deleteErrorMessage} tone="error" onClose={() => setDeleteErrorMessage('')} />
       )}
     </div>
   )

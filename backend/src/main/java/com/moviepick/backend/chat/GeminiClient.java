@@ -11,6 +11,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.HttpClientErrorException;
+import org.springframework.web.client.HttpServerErrorException;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
@@ -89,9 +90,15 @@ public class GeminiClient {
             // 중에도 쉽게 걸립니다. gemini.model을 더 넉넉한 무료 한도의 모델로 바꾸는 것도 방법입니다.
             log.warn("Gemini API 요청 한도를 초과했습니다.", e);
             throw new ApiException(dailyQuotaExceededMessage(e), HttpStatus.TOO_MANY_REQUESTS);
+        } catch (HttpServerErrorException e) {
+            // Gemini 쪽이 일시적으로 과부하(503 UNAVAILABLE 등)일 때 raw JSON 에러 본문이 그대로 사용자
+            // 화면에 노출되던 문제가 있었습니다(2026-10-17 실측) - 원인 파악용 로그는 그대로 남기되,
+            // 사용자에게는 영어 원문 대신 친화적인 안내만 보여줍니다.
+            log.error("Gemini API가 일시적으로 응답하지 못했습니다.", e);
+            throw new ApiException("지금 AI 응답이 몰려서 일시적으로 답변하지 못했어요. 잠시 후 다시 시도해주세요.", HttpStatus.BAD_GATEWAY);
         } catch (RestClientException e) {
             log.error("Gemini API 호출 자체가 실패했습니다.", e);
-            throw new ApiException("Gemini API 호출에 실패했습니다: " + e.getMessage(), HttpStatus.BAD_GATEWAY);
+            throw new ApiException("지금 AI 응답을 받아오지 못했어요. 잠시 후 다시 시도해주세요.", HttpStatus.BAD_GATEWAY);
         }
 
         return extractText(responseBody);

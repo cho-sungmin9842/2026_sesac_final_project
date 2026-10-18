@@ -48,6 +48,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -224,6 +225,16 @@ public class ChatService {
             return persistTurn(user, conversation, request.message(), PAST_SCREENING_REPLY, List.of());
         }
 
+        // "상영정보 알려줘"처럼 영화명 없이 상영 정보만 물어보면, Gemini 의도 분류에 맡기는 기존 흐름이
+        // (query 슬롯이 비어 movie_question 분기를 못 타고) 일반 추천 파이프라인으로 새서, 물어본 것과
+        // 전혀 상관없는(심지어 성인물까지 섞인) 영화 목록을 "추천"이랍시고 보여주는 문제가 있었습니다
+        // (2026-10-18 실측/요청). "지금 상영중인 영화" 목록 안에서 알아볼 수 있는 제목이 메시지에 전혀
+        // 없으면, Gemini를 거치지 않고 항상 똑같이 영화명을 되묻습니다 - 반복 질문에도 매번 같은 답이
+        // 나오게 하기 위해서입니다(어제/저번주 체크와 같은 이유).
+        if (SCREENING_INFO_HINT.matcher(request.message()).find() && findMentionedNowShowingMovieId(request.message()) == null) {
+            return persistTurn(user, conversation, request.message(), SCREENING_INFO_NO_TITLE_REPLY, List.of());
+        }
+
         // 의도 분류 + 조건/슬롯 추출을 한 번의 Gemini 구조화 출력 호출로 전부 처리합니다(예전엔 찜/리뷰/
         // 시청완료/선호장르/상영중/좌석/예매마다 별도 정규식 게이트가 ~20개 있었는데, 비슷한 의미의 새
         // 표현을 못 잡는 버그가 기능마다 반복돼서 의도 분류 자체를 Gemini에 맡기도록 통합했습니다
@@ -250,7 +261,7 @@ public class ChatService {
         // 알려줘"처럼 장르/검색어/연도 조건이 함께 온 복합 질문은 그대로 Gemini 기반 recommend
         // 파이프라인(restrictToNowShowing)으로 흘려보내야 하므로 건드리지 않습니다.
         boolean isPureScreeningQuery = filter.genre() == null && filter.query() == null && filter.year() == null;
-        if (request.message().contains("상영") && isPureScreeningQuery) {
+        if (MOVIE_LISTING_HINT.matcher(request.message()).find() && isPureScreeningQuery) {
             if (TODAY_HINT.matcher(request.message()).find()) {
                 return answerDateScreeningQuestion(user, conversation, request.message(), LocalDate.now());
             }
@@ -300,7 +311,7 @@ public class ChatService {
             case "booking_change_seat":
                 return handleSeatChangeRequest(user, conversation, request.message(), filter);
             case "seat_status":
-                return handleSeatStatusRequest(user, conversation, request.message(), fullHistory);
+                return handleSeatStatusRequest(user, conversation, request.message());
             case "pricing_info":
                 return handlePricingInfoRequest(user, conversation, request.message(), filter.query());
             case "off_topic":
@@ -713,7 +724,19 @@ public class ChatService {
     // "지금"/"오늘"/"금일"/"당일"로 오늘을 가리키는 표현 - "내일"/"다음주"처럼 오늘이 아닌 날을 가리키는
     // 단어는 당연히 포함하지 않습니다. "금일"/"당일"은 "오늘"의 formal 동의어로, 2026-10-13 요청에 따라
     // 완전히 동일하게 취급합니다.
+    // "상영정보 알려줘"/"상영 시간 알려줘"/"몇시 상영해"처럼 영화명 없이 상영 정보 자체를 물어본
+    // 표현입니다 - findMentionedNowShowingMovieId로 메시지 안에서 영화명을 못 찾았을 때만 씁니다.
+    private static final java.util.regex.Pattern SCREENING_INFO_HINT =
+            java.util.regex.Pattern.compile("상영\\s*정보|상영\\s*시간|몇\\s*시.*상영|상영.*몇\\s*시");
+    private static final String SCREENING_INFO_NO_TITLE_REPLY = "어떤 영화의 상영 정보가 궁금하신가요? 영화 제목을 함께 말씀해주세요.";
+
     private static final java.util.regex.Pattern TODAY_HINT = java.util.regex.Pattern.compile("지금|오늘|금일|당일");
+    // "오늘 영화 뭐 있어"처럼 "상영"이라는 단어 없이 "오늘/내일 무슨 영화를 하는지" 물어본 경우도 "오늘
+    // 뭐 상영해?"와 똑같이 답해야 합니다 - "상영"이 없으면 위 TODAY_HINT/TOMORROW_HINT 분기를 아예
+    // 타지 않아, 거의 같은 질문인데도 문구에 따라 완전히 다른(날짜와 무관한 일반 추천) 답이 나가는
+    // 버그가 있었습니다(2026-10-17 실측).
+    private static final java.util.regex.Pattern MOVIE_LISTING_HINT =
+            java.util.regex.Pattern.compile("상영|영화.{0,4}(뭐|뭘).{0,6}있");
     // "어제"/"작일"/"전일"(둘 다 어제의 formal 동의어)로 어제를 가리키는 표현입니다. reply() 상단에서
     // Gemini 호출 전에 PAST_SCREENING_REPLY로 바로 답하므로 여기선 패턴 매칭만 담당합니다.
     private static final java.util.regex.Pattern YESTERDAY_HINT = java.util.regex.Pattern.compile("어제|작일|전일");
@@ -1318,8 +1341,22 @@ public class ChatService {
                 .filter(movie -> matchesRuntime(movie, filter.runtimeMaxMinutes()))
                 .filter(movie -> !excludeMovieIds.contains(movie.id()))
                 .filter(movie -> restrictToIds == null || restrictToIds.contains(movie.id()))
+                .filter(movie -> !isExcludedAdultContent(movie))
                 .limit(limit)
                 .toList();
+    }
+
+    // "에로" 장르의 청소년관람불가 영화입니다. AI 추천은 장르를 특정했든("아무거나 추천해줘") 안 했든
+    // 전부 이 공용 필터를 거치는데, 조건을 전혀 안 준 "아무거나" 요청에서 최신 등록작 중 하필 이런
+    // 영화가 최상단에 뜨는 문제가 있었습니다(2026-10-18 실측). 사용자가 명시적으로 "에로 영화 추천해줘"
+    // 처럼 콕 집어 요청한 경우까지 전부 똑같이 제외합니다 - AI 채팅은 성인 인증 절차가 없는 일반
+    // 추천 기능이라, 조건에 따라 다르게 허용할 이유가 없습니다.
+    private static final java.util.Set<String> EXCLUDED_ADULT_GENRES = java.util.Set.of("에로");
+
+    private boolean isExcludedAdultContent(MovieSummaryDto movie) {
+        return "청소년관람불가".equals(movie.ageRating())
+                && movie.genres() != null
+                && movie.genres().stream().anyMatch(EXCLUDED_ADULT_GENRES::contains);
     }
 
     // 이 대화(user)에서 지금까지 AI가 실제로 추천했던 영화 id를 전부 모읍니다(움직이는 창 없이 저장된
@@ -1602,13 +1639,33 @@ public class ChatService {
         return List.of();
     }
 
+    // "그 중에 하나만"/"한 편만"처럼 직전 추천 여러 편 중 "하나"만 콕 집었는데 그게 어떤 영화인지는
+    // 특정하지 못한 경우입니다. 찜/시청완료 둘 다 "특정 제목을 못 찾으면 직전 추천 목록 전체를 대상으로
+    // 한다"는 같은 정책을 쓰는데, 이 정책이 "전부"와 "그중 하나"를 구분하지 못해 "하나만 찜해줘"라고
+    // 했는데 추천받은 영화 전부가 찜돼버리는 버그가 있었습니다(2026-10-18 실측). 후보가 2편 이상이고
+    // 이 힌트가 있으면 추측해서 틀리느니 되묻습니다(후보가 1편뿐이면 애초에 모호하지 않으므로 그대로
+    // 기존 정책을 따릅니다).
+    private static final java.util.regex.Pattern SINGLE_ITEM_HINT = java.util.regex.Pattern.compile("하나|한\\s*편|한\\s*개");
+
+    private ChatResponseDto askWhichOneIfAmbiguous(
+            User user, ChatConversation conversation, String userMessage, String actionLabel, List<MovieSummaryDto> candidates
+    ) {
+        String titles = candidates.stream().map(MovieSummaryDto::title).collect(Collectors.joining(", "));
+        String reply = "어떤 영화를 %s할지 제목으로 말씀해주시겠어요? (후보: %s)".formatted(actionLabel, titles);
+        return persistTurn(user, conversation, userMessage, reply, candidates);
+    }
+
     // "이 영화 찜해줘"처럼 직전에 추천받은 영화를 찜 목록에 담아달라는 요청입니다.
     private ChatResponseDto handleWishlistRequest(
             User user, ChatConversation conversation, String userMessage, ExtractedFilter filter, List<ChatMessage> fullHistory
     ) {
         List<MovieSummaryDto> resolved = resolveNewMovieReferences(filter.movieTitles(), userMessage, fullHistory);
+        List<MovieSummaryDto> lastRecommended = lastRecommendedMovies(fullHistory);
+        if (resolved.isEmpty() && lastRecommended.size() > 1 && SINGLE_ITEM_HINT.matcher(userMessage).find()) {
+            return askWhichOneIfAmbiguous(user, conversation, userMessage, "찜", lastRecommended);
+        }
         // 특정 제목을 못 찾았으면("이 영화 찜해줘"처럼 지시어만 쓴 경우 등) 직전 추천 목록 전체를 찜합니다.
-        List<MovieSummaryDto> movies = !resolved.isEmpty() ? resolved : lastRecommendedMovies(fullHistory);
+        List<MovieSummaryDto> movies = !resolved.isEmpty() ? resolved : lastRecommended;
         if (movies.isEmpty()) {
             String reply = "먼저 추천받은 영화가 있어야 찜할 수 있어요! 어떤 영화를 찾아드릴까요?";
             return persistTurn(user, conversation, userMessage, reply, List.of());
@@ -1895,7 +1952,12 @@ public class ChatService {
             return persistTurn(user, conversation, userMessage, e.getMessage(), List.of(movie));
         }
         String reply = "'%s' 리뷰가 저장됐어요! (평점 %d점)\n\"%s\"".formatted(movie.title(), score, content);
-        return persistTurn(user, conversation, userMessage, reply, List.of(movie));
+        // 응답에 함께 붙는 영화 카드의 평점/리뷰 건수는 방금 저장한 리뷰를 반영해야 합니다 - movie는 저장
+        // 전에 이미 구해둔 값이라 평점이 그대로라, 카드만 보면 방금 쓴 리뷰가 없는 것처럼 보이는 문제가
+        // 있었습니다(2026-10-17 실측 - 다음 턴에 다시 물어보면 그제서야 반영돼 있었음). 저장 직후 다시
+        // 조회해 최신 평점으로 바꿔치기합니다(실패하면 기존 movie로 대체 - 카드 자체가 빠지는 것보다 낫습니다).
+        MovieSummaryDto refreshed = toSummaryOrNull(movie.id());
+        return persistTurn(user, conversation, userMessage, reply, List.of(refreshed != null ? refreshed : movie));
     }
 
     private ChatResponseDto handleReviewListRequest(User user, ChatConversation conversation, String userMessage) {
@@ -1956,7 +2018,11 @@ public class ChatService {
             User user, ChatConversation conversation, String userMessage, ExtractedFilter filter, List<ChatMessage> fullHistory
     ) {
         List<MovieSummaryDto> resolved = resolveNewMovieReferences(filter.movieTitles(), userMessage, fullHistory);
-        List<MovieSummaryDto> movies = !resolved.isEmpty() ? resolved : lastRecommendedMovies(fullHistory);
+        List<MovieSummaryDto> lastRecommended = lastRecommendedMovies(fullHistory);
+        if (resolved.isEmpty() && lastRecommended.size() > 1 && SINGLE_ITEM_HINT.matcher(userMessage).find()) {
+            return askWhichOneIfAmbiguous(user, conversation, userMessage, "시청완료로 추가", lastRecommended);
+        }
+        List<MovieSummaryDto> movies = !resolved.isEmpty() ? resolved : lastRecommended;
         if (movies.isEmpty()) {
             String reply = "어떤 영화를 시청완료로 표시할지 영화 제목을 말씀해주시겠어요?";
             return persistTurn(user, conversation, userMessage, reply, List.of());
@@ -2050,39 +2116,72 @@ public class ChatService {
     private static final java.util.regex.Pattern THEATER_FRAGMENT = java.util.regex.Pattern.compile("(\\d+)\\s*관");
     private static final java.util.regex.Pattern TIME_FRAGMENT = java.util.regex.Pattern.compile("(\\d{1,2})\\s*:\\s*(\\d{2})");
 
-    // "10/11(일) 2관: 20:05 예매 좌석 현황을 알려줘"처럼, 직전에 안내한 상영정보 목록에서 특정 회차를
-    // 콕 집어 좌석 현황을 물어본 요청입니다. 날짜/상영관/시간이 전부 숫자 패턴이라 Gemini 없이 정규식
-    // 으로 바로 그 회차를 찾아 실제 seats 테이블 상태로 답합니다. 어떤 영화인지는 말하지 않는 게 보통이라
-    // (바로 위에서 그 영화 얘기를 하고 있었으니까), 직전에 실제로 다뤘던 영화를 그대로 기준으로 삼습니다.
-    private ChatResponseDto handleSeatStatusRequest(
-            User user, ChatConversation conversation, String userMessage, List<ChatMessage> fullHistory
-    ) {
-        String lastMovieId = lastRecommendedMovieId(fullHistory);
-        if (lastMovieId == null) {
-            String reply = "어떤 영화의 좌석 현황인지 알 수 없어요. 먼저 영화 이름을 말씀해주시거나 상영정보를 물어봐주세요.";
-            return persistTurn(user, conversation, userMessage, reply, List.of());
-        }
+    // "인턴 10/18(일) 2관: 19:07 좌석 현황 알려줘"처럼, 영화명과 상영정보(날짜/상영관/시간)를 메시지
+    // 자체에 전부 적어야만 답합니다. 직전 대화 맥락(마지막으로 언급된 영화 등)에 기대어 하나라도
+    // 추측하면, 사용자가 실제로는 다른 영화/회차를 묻고 있는데도 엉뚱한 좌석 현황을 보여줄 위험이 있어
+    // (2026-10-17 실측) 아예 추측 자체를 없애고, 영화명 또는 상영정보 중 하나라도 빠지면 항상 같은
+    // 안내 문구로 다시 입력을 요청합니다(2026-10-18 요청).
+    private static final String SEAT_STATUS_MISSING_INFO_REPLY = "영화명과 상영정보를 다시 입력해주세요.";
 
-        java.util.regex.Matcher dateMatcher = DATE_FRAGMENT.matcher(userMessage);
+    // 좌석 현황 질문의 날짜도 "10/18"·"10.18" 숫자 표기뿐 아니라 "10월18일" 한글 표기까지 인식해야
+    // 합니다(extractMentionedDate가 이미 쓰는 두 패턴을 그대로 재사용) - 한글 표기만 인식하지 못해서
+    // 똑같은 회차를 물어봐도 날짜 표기법에 따라 결과가 달라지는 버그가 있었습니다(2026-10-18 실측).
+    private int[] extractSeatStatusDate(String message) {
+        java.util.regex.Matcher koreanMatcher = KOREAN_DATE_HINT.matcher(message);
+        if (koreanMatcher.find()) {
+            return new int[] { Integer.parseInt(koreanMatcher.group(1)), Integer.parseInt(koreanMatcher.group(2)) };
+        }
+        java.util.regex.Matcher slashMatcher = DATE_FRAGMENT.matcher(message);
+        if (slashMatcher.find()) {
+            return new int[] { Integer.parseInt(slashMatcher.group(1)), Integer.parseInt(slashMatcher.group(2)) };
+        }
+        return null;
+    }
+
+    // 메시지에 영화명+날짜+상영관+시간이 전부 적혀 있으면 그 회차를 직접 찾습니다(좌석현황 질문과
+    // 예매 요청이 공유합니다 - 2026-10-18 요청: "OOO 상영정보 알려줘"로 회차를 이미 다 들은 사용자가
+    // 그 정보를 그대로 넣어 예매를 요청해도, "직전에 좌석현황을 물어본 회차"만 참조하던 기존 방식으로는
+    // 못 찾아 예매가 거부되는 문제가 있었습니다). 하나라도 빠지면(또는 그런 회차가 없으면) null입니다.
+    private Screening findScreeningMentionedInMessage(String userMessage) {
+        String movieId = findMentionedNowShowingMovieId(userMessage);
+        if (movieId == null) {
+            return null;
+        }
+        int[] dateParts = extractSeatStatusDate(userMessage);
         java.util.regex.Matcher theaterMatcher = THEATER_FRAGMENT.matcher(userMessage);
         java.util.regex.Matcher timeMatcher = TIME_FRAGMENT.matcher(userMessage);
-        if (!dateMatcher.find() || !theaterMatcher.find() || !timeMatcher.find()) {
-            String reply = "몇 월 며칠, 몇 관, 몇 시 회차인지 알려주시면 좌석 현황을 확인해드릴게요. (예: \"10/11 2관 20:05 좌석 현황 알려줘\")";
-            return persistTurn(user, conversation, userMessage, reply, List.of());
+        if (dateParts == null || !theaterMatcher.find() || !timeMatcher.find()) {
+            return null;
         }
-
-        int month = Integer.parseInt(dateMatcher.group(1));
-        int day = Integer.parseInt(dateMatcher.group(2));
         String theaterLabel = theaterMatcher.group(1) + "관";
         String timeLabel = "%02d:%02d".formatted(Integer.parseInt(timeMatcher.group(1)), Integer.parseInt(timeMatcher.group(2)));
-
-        List<Screening> screenings = screeningRepository.findByMovieIdOrderByDateAscStartTimeAsc(lastMovieId);
-        Screening match = screenings.stream()
-                .filter(s -> s.getDate().getMonthValue() == month && s.getDate().getDayOfMonth() == day)
+        return screeningRepository.findByMovieIdOrderByDateAscStartTimeAsc(movieId).stream()
+                .filter(s -> s.getDate().getMonthValue() == dateParts[0] && s.getDate().getDayOfMonth() == dateParts[1])
                 .filter(s -> s.getTheater().getName().equals(theaterLabel))
                 .filter(s -> s.getStartTime().toString().startsWith(timeLabel))
                 .findFirst()
                 .orElse(null);
+    }
+
+    private ChatResponseDto handleSeatStatusRequest(User user, ChatConversation conversation, String userMessage) {
+        // 메시지에 "지금 상영중인 영화" 중 하나의 제목이 그대로 적혀 있어야만 그 영화로 인정합니다 -
+        // 영화명이 아예 없으면 어떤 영화인지 추측하지 않습니다.
+        if (findMentionedNowShowingMovieId(userMessage) == null) {
+            return persistTurn(user, conversation, userMessage, SEAT_STATUS_MISSING_INFO_REPLY, List.of());
+        }
+
+        java.util.regex.Matcher theaterMatcher = THEATER_FRAGMENT.matcher(userMessage);
+        java.util.regex.Matcher timeMatcher = TIME_FRAGMENT.matcher(userMessage);
+        int[] dateParts = extractSeatStatusDate(userMessage);
+        if (dateParts == null || !theaterMatcher.find() || !timeMatcher.find()) {
+            return persistTurn(user, conversation, userMessage, SEAT_STATUS_MISSING_INFO_REPLY, List.of());
+        }
+
+        int month = dateParts[0];
+        int day = dateParts[1];
+        String theaterLabel = theaterMatcher.group(1) + "관";
+        String timeLabel = "%02d:%02d".formatted(Integer.parseInt(timeMatcher.group(1)), Integer.parseInt(timeMatcher.group(2)));
+        Screening match = findScreeningMentionedInMessage(userMessage);
 
         if (match == null) {
             String reply = "%d/%d %s %s 회차를 찾지 못했어요. 상영정보를 다시 확인해주시겠어요?"
@@ -2230,7 +2329,12 @@ public class ChatService {
     private ChatResponseDto handleBookingRequest(
             User user, ChatConversation conversation, String userMessage, List<ChatMessage> fullHistory
     ) {
-        Long screeningId = lastSeatStatusScreeningId(fullHistory);
+        // 메시지 자체에 영화명+날짜+상영관+시간이 전부 적혀 있으면(예: 상영정보를 먼저 물어본 뒤 그
+        // 내용을 그대로 넣어 예매를 요청한 경우) 그 회차를 최우선으로 씁니다 - "직전에 좌석현황을
+        // 물어본 회차"에만 기대면, 그 회차와 다른 영화/회차를 메시지에 콕 집어 말해도 무시되고 엉뚱한
+        // 회차가 예매될 위험이 있습니다(좌석현황 조회와 같은 이유, 2026-10-18 요청).
+        Screening mentioned = findScreeningMentionedInMessage(userMessage);
+        Long screeningId = mentioned != null ? mentioned.getId() : lastSeatStatusScreeningId(fullHistory);
         if (screeningId == null) {
             String reply = "어떤 회차를 예매할지 알 수 없어요. 먼저 영화의 상영정보나 좌석 현황을 확인해주세요.";
             return persistTurn(user, conversation, userMessage, reply, List.of());
@@ -2414,6 +2518,17 @@ public class ChatService {
             log.warn("'더 추천해줘' 안전망에서 직전 추천 영화({})를 다시 조회하지 못했습니다.", lastMovieId, e);
             return filter;
         }
+    }
+
+    // 메시지에 "지금 상영중인 영화" 중 하나의 제목이 그대로 들어있으면 그 영화의 id를 돌려줍니다(없으면
+    // null). 여러 제목이 동시에 매칭되면(예: 짧은 제목이 긴 제목의 부분 문자열인 경우) 더 긴(더 구체적인)
+    // 제목을 우선합니다.
+    private String findMentionedNowShowingMovieId(String userMessage) {
+        return movieService.getOrCreateTodayShowingMovies().stream()
+                .filter(movie -> movie.title() != null && userMessage.contains(movie.title()))
+                .max(Comparator.comparingInt(movie -> movie.title().length()))
+                .map(MovieSummaryDto::id)
+                .orElse(null);
     }
 
     // 가장 최근에 실제로 영화를 추천했던 AI 메시지의 첫 번째 영화 id를 찾습니다.

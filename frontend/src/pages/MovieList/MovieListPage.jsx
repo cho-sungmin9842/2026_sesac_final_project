@@ -72,11 +72,11 @@ function MovieListPage() {
     setPage(1)
   }, [query, field, filters.genres, filters.year, filters.runtime, sort])
 
-  // 장르/개봉연도/러닝타임 중 하나를 고르면, 스크롤을 내려서 아래쪽 카드를 보던 중이었어도 바뀐 결과를
-  // 처음부터 볼 수 있도록 맨 위로 이동합니다.
+  // 장르/개봉연도/러닝타임을 고르거나 페이지를 넘기면, 스크롤을 내려서 아래쪽 카드를 보던 중이었어도
+  // 바뀐 결과를 처음부터 볼 수 있도록 맨 위로 이동합니다.
   useEffect(() => {
     window.scrollTo(0, 0)
-  }, [filters.genres, filters.year, filters.runtime])
+  }, [filters.genres, filters.year, filters.runtime, page])
 
   useEffect(() => {
     let cancelled = false

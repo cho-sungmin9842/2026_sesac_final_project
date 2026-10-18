@@ -8,6 +8,7 @@ import com.moviepick.backend.kmdb.dto.KmdbPerson;
 import com.moviepick.backend.kmdb.dto.KmdbSearchResponse;
 import com.moviepick.backend.movie.dto.MovieDetailDto;
 import com.moviepick.backend.movie.dto.MovieSearchResultDto;
+import com.moviepick.backend.movie.dto.MovieSuggestionDto;
 import com.moviepick.backend.movie.dto.MovieSummaryDto;
 import com.moviepick.backend.review.RatingSummary;
 import com.moviepick.backend.review.ReviewService;
@@ -26,6 +27,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
 
@@ -46,6 +48,7 @@ public class MovieService {
     private final NowShowingSnapshotRepository nowShowingSnapshotRepository;
     private final MovieCountCacheService movieCountCacheService;
     private final MovieYearIndexRepository movieYearIndexRepository;
+    private final MovieRepository movieRepository;
 
     public MovieService(
             KmdbClient kmdbClient,
@@ -54,7 +57,8 @@ public class MovieService {
             MovieCacheService movieCacheService,
             NowShowingSnapshotRepository nowShowingSnapshotRepository,
             MovieCountCacheService movieCountCacheService,
-            MovieYearIndexRepository movieYearIndexRepository
+            MovieYearIndexRepository movieYearIndexRepository,
+            MovieRepository movieRepository
     ) {
         this.kmdbClient = kmdbClient;
         this.movieMapper = movieMapper;
@@ -63,6 +67,7 @@ public class MovieService {
         this.nowShowingSnapshotRepository = nowShowingSnapshotRepository;
         this.movieCountCacheService = movieCountCacheService;
         this.movieYearIndexRepository = movieYearIndexRepository;
+        this.movieRepository = movieRepository;
     }
 
     // 개봉연도의 "정보 없음" 필터 코드 - movieApi.js가 "정보 없음" 라벨을 이 값으로 바꿔 보냅니다
@@ -82,11 +87,13 @@ public class MovieService {
         // 평점순(검색어 없음, 장르는 0개~여러 개 모두) - 장르/연도 조건과 함께 KMDB에서 500건만 미리 받아
         // 그 안에서 재정렬하면, 실제로 리뷰가 달린 영화가 그 500건(최신순 상위) 범위 밖에 있는 경우가 흔해
         // 평점 있는 영화가 하나도 안 보이는 문제가 있었습니다(장르를 좁혀도 마찬가지입니다 - 그 장르
-        // 안에서도 최신 500건 범위 밖이면 똑같이 안 보입니다). 그래서 평점순일 때는 KMDB 전체를 훑는 대신
-        // 우리 DB(리뷰)에 평점이 있는 영화만 먼저 평점순으로 가져온 뒤(이 목록 자체가 작으므로 전수 조사
-        // 가능), 장르 조건은 그 안에서 걸러냅니다(평점이 아예 없는 영화는 "평점순" 목록에 넣을 수 없으니 제외).
+        // 안에서도 최신 500건 범위 밖이면 똑같이 안 보입니다). 그래서 평점순일 때는 리뷰가 있는 영화를
+        // 먼저 우리 DB에서 평점 내림차순으로 전수 조사해 맨 앞에 배치하고, 리뷰가 없는 나머지는 뒤에
+        // 최신순으로 이어 붙입니다 - "정렬"은 순서만 바꾸는 것이지 "필터"가 아니므로, 전체 건수는 다른
+        // 정렬과 동일해야 합니다(2026-10-18 요청 - 예전엔 리뷰 있는 몇 편만 남기고 나머지 수만 건이
+        // 통째로 사라져서, 사실상 "평점 있는 영화만 보여주는 필터"처럼 동작했습니다).
         if (!hasQuery && "rating".equals(sort)) {
-            return searchByRating(cleanGenres, runtime, page, pageSize);
+            return searchByRating(cleanGenres, year, runtime, page, pageSize);
         }
 
         if (cleanGenres.size() <= 1 && !hasQuery) {
@@ -182,6 +189,53 @@ public class MovieService {
         int totalPages = totalCount == 0 ? 0 : (int) Math.ceil(totalCount / (double) pageSize);
 
         return new MovieSearchResultDto(movies, page, pageSize, totalCount, totalPages);
+    }
+
+    // 헤더 검색창 자동완성(제목) 전용(5개로 제한 - 프론트가 limit을 넘겨줍니다). KMDB를 부르지 않고
+    // 이미 캐시된 movies 테이블만 바로 조회하므로(사실상 전체 카탈로그가 들어있음) 타이핑하는 동안에도
+    // 즉시(수십 ms) 응답됩니다.
+    public List<MovieSuggestionDto> suggestMovies(String query, int limit) {
+        if (query == null || query.isBlank()) {
+            return List.of();
+        }
+        return movieRepository.findTitleSuggestions(query.trim(), limit);
+    }
+
+    // 헤더 검색창 자동완성(배우/감독) 전용. "사람 이름"을 자동완성해야 하는데 영화 제목으로 답하면
+    // 안 되므로(2026-10-18 실측 - 배우/감독으로 검색해도 영화 제목이 후보로 떴던 버그), 영화가 아니라
+    // 그 영화들에 실제로 달려 있는 배우/감독 "이름"만 뽑아 중복을 제거하고 돌려줍니다. 한 번의 영화
+    // 검색 응답 안에 이름이 일치하는 사람이 여러 명 섞여 나올 수 있어 limit보다 넉넉히(4배) 받아
+    // 그 안에서 고릅니다. 키워드(줄거리/소재)는 '사람 이름'이라는 개념 자체가 없어 이 메서드를 쓰지
+    // 않고, 자동완성 없이 일반 입력으로만 검색합니다(2026-10-18 요청).
+    public List<String> suggestPersonNames(String query, String field, int limit) {
+        if (query == null || query.isBlank() || !("actor".equals(field) || "director".equals(field))) {
+            return List.of();
+        }
+        String trimmed = query.trim();
+        KmdbSearchResponse response = searchByField(field, trimmed, null, null, null, limit * 4, 0, null);
+
+        java.util.LinkedHashSet<String> names = new java.util.LinkedHashSet<>();
+        for (KmdbMovieItem item : response.allItems()) {
+            List<KmdbPerson> persons = "actor".equals(field)
+                    ? (item.getActors() == null ? null : item.getActors().getActor())
+                    : (item.getDirectors() == null ? null : item.getDirectors().getDirector());
+            if (persons == null) {
+                continue;
+            }
+            for (KmdbPerson person : persons) {
+                String name = person.displayName();
+                if (name != null && containsIgnoreCase(name, trimmed)) {
+                    names.add(name);
+                }
+            }
+        }
+
+        return names.stream()
+                .sorted(Comparator
+                        .comparingInt((String name) -> name.equals(trimmed) ? 0 : name.startsWith(trimmed) ? 1 : 2)
+                        .thenComparingInt(String::length))
+                .limit(limit)
+                .toList();
     }
 
     // fetchYearIndexedPage와 같은 movie_year_index를 쓰지만, 연도를 하나로 좁히지 않고 장르별 전체
@@ -531,14 +585,59 @@ public class MovieService {
         return results;
     }
 
-    // 평점순 전용 - getPopularMovies와 같은 방식(리뷰 테이블에서 먼저 평점순으로 가져온 뒤 KMDB로 채움)
-    // 이지만, 고정 limit이 아니라 실제 페이지네이션(page/pageSize)을 지원하고 장르 조건도 받습니다.
-    // minScore를 0으로 두면 평점(1~5)이 하나라도 있는 영화는 전부 대상이 됩니다 - 리뷰가 달린 영화 자체가
-    // (장르 필터 없이도) 많지 않을 거라 가정하고 전부 가져와 KMDB 상세를 조회한 뒤 장르를 거릅니다.
-    private MovieSearchResultDto searchByRating(List<String> genres, String runtime, int page, int pageSize) {
-        List<TopRatedMovie> topRated = reviewService.getTopRatedMovies(0);
+    // 평점순 - 리뷰가 있는 영화를 평점 내림차순으로 먼저 전수 조사해 앞쪽에 배치하고(실제로 몇 안 되므로
+    // 전부 가져와도 됩니다), 리뷰가 없는 나머지는 최신순 카탈로그에서 이어 붙입니다. "정렬"일 뿐 "필터"가
+    // 아니므로, 전체 건수는 다른 정렬(최신순/이름순)과 같아야 합니다(2026-10-18 요청 - 예전엔 리뷰 있는
+    // 몇 편만 남기고 나머지가 통째로 사라졌습니다).
+    private MovieSearchResultDto searchByRating(List<String> genres, String year, String runtime, int page, int pageSize) {
+        List<MovieSummaryDto> rated = ratedMoviesMatching(genres, year, runtime);
+        Set<String> ratedIds = rated.stream().map(MovieSummaryDto::id).collect(Collectors.toSet());
 
-        // topRated가 이미 평점 내림차순이라, 장르로 거르기만 해도 그 순서가 그대로 유지됩니다.
+        int fromIndex = (page - 1) * pageSize;
+        int toIndex = page * pageSize;
+        List<MovieSummaryDto> pageMovies = new ArrayList<>();
+        int ratedFrom = Math.min(fromIndex, rated.size());
+        int ratedTo = Math.min(toIndex, rated.size());
+        if (ratedFrom < ratedTo) {
+            pageMovies.addAll(rated.subList(ratedFrom, ratedTo));
+        }
+
+        int remaining = pageSize - pageMovies.size();
+        int unratedSkip = Math.max(0, fromIndex - rated.size());
+        int totalCount;
+
+        if (genres.size() <= 1) {
+            // 장르 0~1개는 '최신순'과 같은 전체 건수 캐시를 그대로 씁니다 - 리뷰 있는 영화도 결국 이
+            // 전체 건수 안에 포함된 숫자라서, 평점순이라고 전체 건수 자체가 달라지지 않습니다.
+            String genre = genres.isEmpty() ? null : genres.get(0);
+            if (remaining > 0) {
+                pageMovies.addAll(fetchLatestFillerSingleGenre(genre, year, runtime, unratedSkip, remaining, ratedIds));
+            }
+            totalCount = movieCountCacheService.getDomesticTotalCount(genre, year, runtime, rated.size());
+        } else {
+            // 장르 2개 이상은 이미 색인으로 정확한 전체 목록을 바로 모을 수 있으므로, 거기서 리뷰 있는
+            // 영화를 뺀 나머지를 그대로 이어 붙이고 실제 개수로 전체 건수를 셉니다.
+            List<MovieSummaryDto> unratedForGenres = fetchIndexedMultiGenrePage(genres).stream()
+                    .filter(movie -> KmdbTextUtils.matchesRuntimeFilter(movie.runtimeMinutes(), runtime))
+                    .filter(movie -> matchesYearFilter(movie.year(), year))
+                    .filter(movie -> !ratedIds.contains(movie.id()))
+                    .toList();
+            if (remaining > 0) {
+                int from = Math.min(unratedSkip, unratedForGenres.size());
+                int to = Math.min(unratedSkip + remaining, unratedForGenres.size());
+                pageMovies.addAll(unratedForGenres.subList(from, to));
+            }
+            totalCount = rated.size() + unratedForGenres.size();
+        }
+
+        int totalPages = totalCount == 0 ? 0 : (int) Math.ceil(totalCount / (double) pageSize);
+        return new MovieSearchResultDto(pageMovies, page, pageSize, totalCount, totalPages);
+    }
+
+    // 리뷰가 있는 영화를 평점 내림차순으로 전수 조사합니다(실제로 몇 안 되므로 KMDB 상세까지 전부
+    // 조회해도 됩니다) - searchByRating이 "평점순" 맨 앞에 배치할 때 씁니다.
+    private List<MovieSummaryDto> ratedMoviesMatching(List<String> genres, String year, String runtime) {
+        List<TopRatedMovie> topRated = reviewService.getTopRatedMovies(0);
         List<MovieSummaryDto> matched = new ArrayList<>();
         for (TopRatedMovie rated : topRated) {
             String[] parts = rated.movieId().split("_", 2);
@@ -558,19 +657,38 @@ public class MovieService {
                 if (!KmdbTextUtils.matchesRuntimeFilter(summary.runtimeMinutes(), runtime)) {
                     continue;
                 }
+                if (!matchesYearFilter(summary.year(), year)) {
+                    continue;
+                }
                 matched.add(summary);
             } catch (Exception ignored) {
                 // KMDB에서 더 이상 찾을 수 없게 된 movieId는 건너뜁니다.
             }
         }
+        return matched;
+    }
 
-        int totalCount = matched.size();
-        int fromIndex = Math.min((page - 1) * pageSize, totalCount);
-        int toIndex = Math.min(page * pageSize, totalCount);
-        List<MovieSummaryDto> movies = matched.subList(fromIndex, toIndex);
-
-        int totalPages = totalCount == 0 ? 0 : (int) Math.ceil(totalCount / (double) pageSize);
-        return new MovieSearchResultDto(movies, page, pageSize, totalCount, totalPages);
+    // 평점순 뒷부분(리뷰 없는 나머지)을 최신순 카탈로그에서 채웁니다. rated로 이미 앞쪽에 배치한 영화는
+    // 최신순 안에서도 자기 자리를 그대로 가지고 있으므로, 중복으로 다시 나오지 않도록 걸러내면서 필요한
+    // 개수(count)만큼 채울 때까지 몇 번 더 받아옵니다(제외되는 건수가 보통 몇 건 안 되므로 금방 채워집니다).
+    private List<MovieSummaryDto> fetchLatestFillerSingleGenre(
+            String genre, String year, String runtime, int skip, int count, Set<String> excludeIds
+    ) {
+        List<MovieSummaryDto> result = new ArrayList<>();
+        int fetchStart = skip;
+        for (int attempt = 0; attempt < 5 && result.size() < count; attempt++) {
+            int need = count - result.size() + excludeIds.size();
+            FilledPage filled = fetchFilledPage(null, "", genre, null, null, runtime, year, need, fetchStart, "prodYear,1");
+            if (filled.movies().isEmpty()) {
+                break;
+            }
+            filled.movies().stream().filter(movie -> !excludeIds.contains(movie.id())).forEach(result::add);
+            fetchStart += filled.movies().size();
+            if (filled.movies().size() < need) {
+                break; // 카탈로그 끝에 도달 - 더 받아와도 늘어나지 않습니다.
+            }
+        }
+        return result.size() > count ? result.subList(0, count) : result;
     }
 
     // 요약 정보는 DB 캐시를 먼저 확인하고, 없을 때만 KMDB를 호출해 새로 캐시에 저장합니다.

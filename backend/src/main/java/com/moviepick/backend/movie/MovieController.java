@@ -4,6 +4,7 @@ import com.moviepick.backend.common.ApiException;
 import com.moviepick.backend.movie.dto.AiSummaryDto;
 import com.moviepick.backend.movie.dto.MovieDetailDto;
 import com.moviepick.backend.movie.dto.MovieSearchResultDto;
+import com.moviepick.backend.movie.dto.MovieSuggestionDto;
 import com.moviepick.backend.movie.dto.MovieSummaryDto;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -49,6 +50,31 @@ public class MovieController {
     @GetMapping("/api/movies/genres")
     public List<String> getGenres() {
         return MovieGenres.ALL;
+    }
+
+    /**
+     * 헤더 검색창 자동완성(제목 검색 전용). 영화 제목 후보를 돌려줍니다. limit은 프론트가 5로 고정해
+     * 넘겨줍니다.
+     */
+    @GetMapping("/api/movies/suggestions")
+    public List<MovieSuggestionDto> getSuggestions(
+            @RequestParam String query,
+            @RequestParam(defaultValue = "5") int limit
+    ) {
+        return movieService.suggestMovies(query, limit);
+    }
+
+    /**
+     * 헤더 검색창 자동완성(배우/감독 검색 전용). 영화 제목이 아니라 실제 "사람 이름" 후보를 돌려줍니다
+     * (field=actor 또는 director만 지원 - 키워드 검색은 자동완성을 지원하지 않습니다).
+     */
+    @GetMapping("/api/movies/person-suggestions")
+    public List<String> getPersonSuggestions(
+            @RequestParam String query,
+            @RequestParam String field,
+            @RequestParam(defaultValue = "5") int limit
+    ) {
+        return movieService.suggestPersonNames(query, field, limit);
     }
 
     /**

@@ -7,7 +7,6 @@ function DeleteAccountDialog({ onClose, onSubmit }) {
 
   const handleSubmit = async (event) => {
     event.preventDefault()
-    if (!window.confirm('정말 탈퇴하시겠습니까? 찜/리뷰/예매 내역 등 모든 정보가 삭제되며 되돌릴 수 없습니다.')) return
     setError('')
     setSubmitting(true)
     try {

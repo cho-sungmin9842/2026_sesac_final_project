@@ -82,6 +82,7 @@ function BookingSeatPage() {
   // 같이 들고 있습니다.
   const selectedSeatsRef = useRef([])
   const isSubmittingRef = useRef(false)
+  const screeningIdRef = useRef(null)
   // 네이티브 confirm/alert 대신 쓰는 커스텀 다이얼로그 상태들.
   const [pendingWheelchairSeat, setPendingWheelchairSeat] = useState(null)
   // "15세이상관람가" 영화에서 청소년 인원을 +1 할 때마다(인원 구분이 "청소년"만으로는 만 12~14세와
@@ -169,6 +170,30 @@ function BookingSeatPage() {
   useEffect(() => {
     isSubmittingRef.current = isSubmitting
   }, [isSubmitting])
+
+  useEffect(() => {
+    screeningIdRef.current = screeningId
+  }, [screeningId])
+
+  // 앱 내부 링크로 다른 화면으로 이동하면 아래 screeningId effect의 cleanup이 선점을 풀어주지만,
+  // 주소창 이동/새로고침/탭 닫기처럼 브라우저가 페이지 자체를 통째로 치워버리는 경우는 React가 그
+  // cleanup을 실행할 틈도 없이 끝나버립니다(선점이 TTL 5분 동안 풀리지 않고 남는 버그 - 2026-10-18
+  // 실측). pagehide는 이런 상황에서도 실행이 보장되는 몇 안 되는 이벤트라, 여기서 한 번 더 해제를
+  // 시도합니다. keepalive를 줘서 문서가 이미 닫히는 중이어도 이 요청만은 전송을 시도합니다(100%
+  // 보장되는 방법은 아니지만, 아무 조치가 없는 것보다는 훨씬 낫습니다 - 그래도 안 풀리면 기존처럼
+  // TTL 만료로 결국 자동 해제됩니다).
+  useEffect(() => {
+    const handlePageHide = () => {
+      const currentScreeningId = screeningIdRef.current
+      if (!currentScreeningId) return
+      selectedSeatsRef.current.forEach((seatId) => {
+        releaseSeatHold(currentScreeningId, seatId, user.id, true).catch(() => {})
+      })
+    }
+    window.addEventListener('pagehide', handlePageHide)
+    return () => window.removeEventListener('pagehide', handlePageHide)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user.id])
 
   useEffect(() => {
     if (!screeningId) {
