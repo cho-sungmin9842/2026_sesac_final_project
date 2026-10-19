@@ -4,8 +4,8 @@ const FEATURES = ['AI 줄거리 요약', '대화형 AI 챗봇', '실시간 좌�
 
 function AuthShell({ mode, tagline, children }) {
   return (
-    <div className="flex min-h-svh bg-slate-100">
-      <div className="relative hidden w-1/2 overflow-hidden bg-slate-950 md:flex md:flex-col md:justify-center md:px-16">
+    <div className="theme-fixed-light flex min-h-svh bg-slate-100">
+      <div className="theme-fixed relative hidden w-1/2 overflow-hidden bg-slate-950 md:flex md:flex-col md:justify-center md:px-16">
         <div
           className="pointer-events-none absolute inset-0 opacity-70"
           style={{

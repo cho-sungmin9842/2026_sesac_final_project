@@ -17,11 +17,11 @@ function NowShowingCard({ movie }) {
             <PosterPlaceholder />
           )}
           <div className="absolute inset-x-2 top-2 flex items-start justify-between gap-1">
-            <span className="max-w-[60%] rounded-md bg-black/60 px-2 py-1 text-[11px] font-semibold leading-tight text-gray-200">
+            <span className="theme-fixed max-w-[60%] rounded-md bg-black/60 px-2 py-1 text-[11px] font-semibold leading-tight text-gray-200">
               {movie.ageRating ?? '정보 없음'}
             </span>
             <span
-              className={`flex shrink-0 items-center gap-1 rounded-md bg-black/60 px-2 py-1 text-xs font-semibold ${
+              className={`theme-fixed flex shrink-0 items-center gap-1 rounded-md bg-black/60 px-2 py-1 text-xs font-semibold ${
                 movie.averageScore != null ? 'text-amber-400' : 'text-gray-400'
               }`}
             >

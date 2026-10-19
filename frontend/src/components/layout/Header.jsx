@@ -3,6 +3,7 @@ import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../auth/AuthContext'
 import { getMovieSuggestions, getPersonSuggestions } from '../../api/movieApi'
 import NotificationBell from './NotificationBell'
+import ThemeToggle from '../common/ThemeToggle'
 
 // 타이핑이 끝나고서야 요청하도록 이 시간만큼 기다립니다(그 전엔 이전 타이머를 취소) - 제목은 로컬
 // 캐시라 거의 즉시 응답되지만, 배우/감독은 KMDB를 직접 조회해 조금 더 걸리므로 그만큼 여유 있게
@@ -187,6 +188,7 @@ function Header() {
         <div className="ml-4 hidden max-w-xl flex-1 md:flex">{searchForm}</div>
 
         <div className="ml-auto hidden items-center gap-4 md:flex">
+          <ThemeToggle />
           <NotificationBell />
           <span className="text-sm text-gray-400">{user?.nickname}</span>
           <NavLink to="/mypage" aria-label="마이페이지">
@@ -199,6 +201,7 @@ function Header() {
 
         {/* md 미만(모바일)에서만 보이는 햄버거 - 내비/검색/사용자 메뉴를 전부 아래 펼침 패널로 옮깁니다. */}
         <div className="ml-auto flex items-center gap-3 md:hidden">
+          <ThemeToggle />
           <NotificationBell />
           <button
             type="button"

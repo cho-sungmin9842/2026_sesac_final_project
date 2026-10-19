@@ -9,7 +9,7 @@ function CarouselNav({ total, index, onPrev, onNext }) {
         type="button"
         onClick={onPrev}
         aria-label="이전 포스터"
-        className="absolute left-1 top-1/2 z-10 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full bg-black/50 text-sm text-white opacity-0 transition-opacity hover:bg-black/70 group-hover:opacity-100"
+        className="absolute left-1 top-1/2 z-10 flex h-7 w-7 -translate-y-1/2 items-center justify-center theme-fixed rounded-full bg-black/50 text-sm text-white opacity-0 transition-opacity hover:bg-black/70 group-hover:opacity-100"
       >
         ‹
       </button>
@@ -17,11 +17,11 @@ function CarouselNav({ total, index, onPrev, onNext }) {
         type="button"
         onClick={onNext}
         aria-label="다음 포스터"
-        className="absolute right-1 top-1/2 z-10 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full bg-black/50 text-sm text-white opacity-0 transition-opacity hover:bg-black/70 group-hover:opacity-100"
+        className="absolute right-1 top-1/2 z-10 flex h-7 w-7 -translate-y-1/2 items-center justify-center theme-fixed rounded-full bg-black/50 text-sm text-white opacity-0 transition-opacity hover:bg-black/70 group-hover:opacity-100"
       >
         ›
       </button>
-      <div className="absolute bottom-2 left-1/2 z-10 flex -translate-x-1/2 gap-1">
+      <div className="theme-fixed absolute bottom-2 left-1/2 z-10 flex -translate-x-1/2 gap-1">
         {Array.from({ length: total }, (_, i) => (
           <span key={i} className={`h-1.5 w-1.5 rounded-full ${i === index ? 'bg-white' : 'bg-white/40'}`} />
         ))}
@@ -57,7 +57,7 @@ function PosterLink({ posterUrls = [], video, title }) {
 
   // 예고편(vodClass가 "예고편"류)이 실제로 있을 때만 호버 오버레이를 보여줍니다.
   const overlay = video ? (
-    <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/60 text-sm font-semibold text-white opacity-0 transition-opacity group-hover:opacity-100">
+    <div className="pointer-events-none absolute inset-0 flex theme-fixed items-center justify-center bg-black/60 text-sm font-semibold text-white opacity-0 transition-opacity group-hover:opacity-100">
       ▶ 예고편 보기
     </div>
   ) : null

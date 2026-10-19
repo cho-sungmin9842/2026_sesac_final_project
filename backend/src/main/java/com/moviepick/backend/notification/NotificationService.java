@@ -64,6 +64,17 @@ public class NotificationService {
         notificationRepository.save(new Notification(bookingUser, "예매 좌석이 변경되었습니다 - " + summary, bookingId));
     }
 
+    // 예매한 영화의 상영이 임박했을 때(상영 당일, 시작 3시간 전) 예매한 본인에게만 보내는 알림입니다. bookingId를
+    // 달아두므로 예매가 취소/삭제되면 이미 보낸 임박 알림도 함께 지워집니다(예매 완료 알림과 같은 규칙).
+    public void notifyShowingReminder(User bookingUser, Long bookingId, String message) {
+        notificationRepository.save(new Notification(bookingUser, message, bookingId));
+    }
+
+    // 같은 예매에 같은 종류(문구 앞머리)의 알림을 이미 보냈는지 확인합니다.
+    public boolean alreadyNotified(Long userId, Long bookingId, String messagePrefix) {
+        return notificationRepository.existsByUserIdAndBookingIdAndMessageStartingWith(userId, bookingId, messagePrefix);
+    }
+
     public List<NotificationDto> list(Long userId) {
         return notificationRepository.findByUserIdOrderByCreatedAtDesc(userId).stream()
                 .map(NotificationDto::from)

@@ -37,7 +37,7 @@ function ChatConversationSidebar({ conversations, activeConversationId, onSelect
 
   return (
     <aside className="hidden w-56 shrink-0 flex-col border-r border-white/10 pr-3 sm:flex">
-      <h2 className="mb-2 px-2 text-[16px] font-semibold uppercase tracking-wide text-[#FFFFF0]">대화 기록</h2>
+      <h2 className="mb-2 px-2 text-[16px] font-semibold uppercase tracking-wide text-white">대화 기록</h2>
       <div className="flex-1 space-y-1 overflow-y-auto">
         {isLoading && <p className="px-2 text-xs text-gray-500">불러오는 중...</p>}
         {!isLoading && conversations.length === 0 && (

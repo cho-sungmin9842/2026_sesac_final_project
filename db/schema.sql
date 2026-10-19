@@ -182,14 +182,16 @@ CREATE TABLE IF NOT EXISTS movie_year_index (
     INDEX idx_movie_year_index_lookup (genre_key, year_key, display_order)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
 
--- 상영관 마스터 데이터. 1관/2관 두 개만 고정으로 존재합니다.
+-- 상영관 마스터 데이터. 1관/2관/3관 세 개가 고정으로 존재합니다(3관은 2026-10-19에 추가 - 상영중 영화가
+-- 하루에 전부 들어갈 용량을 늘리려는 목적이라, 상영정보 생성 배치(ScreeningGenerationService)가 이 테이블의
+-- 상영관 전체를 순서대로 사용합니다).
 CREATE TABLE IF NOT EXISTS theaters (
     id   BIGINT AUTO_INCREMENT PRIMARY KEY,
     name VARCHAR(50) NOT NULL,
     CONSTRAINT uq_theaters_name UNIQUE (name)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
 
-INSERT IGNORE INTO theaters (name) VALUES ('1관'), ('2관');
+INSERT IGNORE INTO theaters (name) VALUES ('1관'), ('2관'), ('3관');
 
 -- 상영정보. 매주 월요일 자정 배치(ScreeningGenerationService)가 그 주(월~일) 분량을 상영중인 영화 목록으로
 -- 자동 생성합니다. movie_id는 다른 도메인과 동일하게 movies 테이블의 합성 id("{movieId}_{movieSeq}")입니다.

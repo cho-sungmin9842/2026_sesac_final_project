@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Outlet } from 'react-router-dom'
 import AdminSidebar from '../components/layout/AdminSidebar'
+import ThemeToggle from '../components/common/ThemeToggle'
 
 // 사이드바가 데스크톱에선 항상 고정폭(w-60)으로 보이고, 모바일에선 기본적으로 숨겨진 오버레이라
 // 열고 닫을 햄버거 버튼이 필요합니다 - 그 상태를 여기서 관리해 AdminSidebar에 내려줍니다.
@@ -21,6 +22,7 @@ function AdminLayout() {
             ☰
           </button>
           <span className="text-sm font-semibold text-white">SESAC MOVIE Admin</span>
+          <ThemeToggle className="ml-auto" />
         </header>
         <main className="min-w-0 flex-1">
           <Outlet />

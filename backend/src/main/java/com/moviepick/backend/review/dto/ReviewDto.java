@@ -16,10 +16,15 @@ public record ReviewDto(
         LocalDateTime updatedAt
 ) {
     public static ReviewDto from(Review review) {
+        return from(review, review.getMovieTitle());
+    }
+
+    // movieTitle: 화면에 보여줄 제목(movies 기준으로 맞춘 값). 저장돼 있던 제목과 다를 수 있어서 따로 받습니다.
+    public static ReviewDto from(Review review, String movieTitle) {
         return new ReviewDto(
                 review.getId(),
                 review.getMovieId(),
-                review.getMovieTitle(),
+                movieTitle,
                 review.getUser().getId(),
                 review.getUser().getNickname(),
                 review.getScore(),

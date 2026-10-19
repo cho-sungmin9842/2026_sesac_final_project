@@ -6,11 +6,172 @@
 
 body {
   margin: 0;
-  background-color: #0b0c14;
-  color: #e5e7eb;
+  background-color: var(--page-bg);
+  color: var(--body-fg, #e5e7eb);
   font-family: system-ui, "Segoe UI", Roboto, sans-serif;
 }
 
 #root {
   min-height: 100svh;
 }
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * 라이트 테마 (자동 생성된 팔레트 - 필요하면 아래 값을 직접 조정하세요)
+ * 컴포넌트는 다크 기준 Tailwind 클래스를 그대로 쓰고, 라이트일 때는 색상 변수만 바꿉니다.
+ * ────────────────────────────────────────────────────────────────────────── */
+:root {
+  --fg-strong: #ffffff;       /* text-white 가 가리키는 색 */
+  --overlay: #ffffff;         /* bg-white/N, border-white/N 가 가리키는 색 */
+  --page-bg: #0b0c14;
+}
+
+html[data-theme="light"] {
+  color-scheme: light;
+  --fg-strong: #0f172a;
+  --overlay: #0f172a;
+  --page-bg: #f1f5f9;
+  --body-fg: #1f2937;
+  --color-slate-50: oklch(20.8% 0.042 265.755);
+  --color-slate-100: oklch(27.9% 0.041 260.031);
+  --color-slate-200: oklch(37.2% 0.044 257.287);
+  --color-slate-300: oklch(44.6% 0.043 257.281);
+  --color-slate-400: oklch(55.4% 0.046 257.417);
+  --color-slate-500: oklch(70.4% 0.04 256.788);
+  --color-slate-600: oklch(70.4% 0.04 256.788);
+  --color-slate-700: oklch(86.9% 0.022 252.894);
+  --color-slate-800: oklch(92.9% 0.013 255.508);
+  --color-slate-900: #ffffff;
+  --color-slate-950: oklch(96.8% 0.007 247.896);
+  --color-gray-50: oklch(13% 0.028 261.692);
+  --color-gray-100: oklch(21% 0.034 264.665);
+  --color-gray-200: oklch(27.8% 0.033 256.848);
+  --color-gray-300: oklch(37.3% 0.034 259.733);
+  --color-gray-400: oklch(44.6% 0.03 256.802);
+  --color-gray-500: oklch(55.1% 0.027 264.364);
+  --color-gray-600: oklch(70.7% 0.022 261.325);
+  --color-gray-700: oklch(87.2% 0.01 258.338);
+  --color-gray-800: oklch(92.8% 0.006 264.531);
+  --color-gray-900: oklch(96.7% 0.003 264.542);
+  --color-gray-950: oklch(98.5% 0.002 247.839);
+  --color-indigo-200: oklch(45.7% 0.24 277.023);
+  --color-indigo-300: oklch(51.1% 0.262 276.966);
+  --color-indigo-400: oklch(51.1% 0.262 276.966);
+  --color-rose-300: oklch(58.6% 0.253 17.585);
+  --color-rose-400: oklch(58.6% 0.253 17.585);
+  --color-red-200: oklch(50.5% 0.213 27.518);
+  --color-red-400: oklch(57.7% 0.245 27.325);
+  --color-amber-400: oklch(66.6% 0.179 58.318);
+  --color-emerald-300: oklch(50.8% 0.118 165.612);
+  --color-emerald-400: oklch(59.6% 0.145 163.225);
+  --color-pink-300: oklch(59.2% 0.249 0.584);
+  --color-blue-300: oklch(54.6% 0.245 262.881);
+  --color-sky-400: oklch(58.8% 0.158 241.966);
+}
+
+/* 라이트 테마에서도 원래(Tailwind 기본) 색 그대로 두고 싶은 영역: 로그인/회원가입, 결제 위젯, 이미지 위 오버레이 등 */
+html[data-theme="light"] .theme-fixed {
+  --fg-strong: #ffffff;
+  --overlay: #ffffff;
+  --color-slate-50: oklch(98.4% 0.003 247.858);
+  --color-slate-100: oklch(96.8% 0.007 247.896);
+  --color-slate-200: oklch(92.9% 0.013 255.508);
+  --color-slate-300: oklch(86.9% 0.022 252.894);
+  --color-slate-400: oklch(70.4% 0.04 256.788);
+  --color-slate-500: oklch(55.4% 0.046 257.417);
+  --color-slate-600: oklch(44.6% 0.043 257.281);
+  --color-slate-700: oklch(37.2% 0.044 257.287);
+  --color-slate-800: oklch(27.9% 0.041 260.031);
+  --color-slate-900: oklch(20.8% 0.042 265.755);
+  --color-slate-950: oklch(12.9% 0.042 264.695);
+  --color-gray-50: oklch(98.5% 0.002 247.839);
+  --color-gray-100: oklch(96.7% 0.003 264.542);
+  --color-gray-200: oklch(92.8% 0.006 264.531);
+  --color-gray-300: oklch(87.2% 0.01 258.338);
+  --color-gray-400: oklch(70.7% 0.022 261.325);
+  --color-gray-500: oklch(55.1% 0.027 264.364);
+  --color-gray-600: oklch(44.6% 0.03 256.802);
+  --color-gray-700: oklch(37.3% 0.034 259.733);
+  --color-gray-800: oklch(27.8% 0.033 256.848);
+  --color-gray-900: oklch(21% 0.034 264.665);
+  --color-gray-950: oklch(13% 0.028 261.692);
+  --color-indigo-200: oklch(87% 0.065 274.039);
+  --color-indigo-300: oklch(78.5% 0.115 274.713);
+  --color-indigo-400: oklch(67.3% 0.182 276.935);
+  --color-rose-300: oklch(81% 0.117 11.638);
+  --color-rose-400: oklch(71.2% 0.194 13.428);
+  --color-red-200: oklch(88.5% 0.062 18.334);
+  --color-red-400: oklch(70.4% 0.191 22.216);
+  --color-amber-400: oklch(82.8% 0.189 84.429);
+  --color-emerald-300: oklch(84.5% 0.143 164.978);
+  --color-emerald-400: oklch(76.5% 0.177 163.223);
+  --color-pink-300: oklch(82.3% 0.12 346.018);
+  --color-blue-300: oklch(80.9% 0.105 251.813);
+  --color-sky-400: oklch(74.6% 0.16 232.661);
+}
+/* 로그인 화면처럼 원래 밝은 화면은 글자색 기준이 반대라 별도 변수 사용 */
+html[data-theme="light"] .theme-fixed-light {
+  --fg-strong: #0f172a;
+  --overlay: #0f172a;
+  --color-slate-50: oklch(98.4% 0.003 247.858);
+  --color-slate-100: oklch(96.8% 0.007 247.896);
+  --color-slate-200: oklch(92.9% 0.013 255.508);
+  --color-slate-300: oklch(86.9% 0.022 252.894);
+  --color-slate-400: oklch(70.4% 0.04 256.788);
+  --color-slate-500: oklch(55.4% 0.046 257.417);
+  --color-slate-600: oklch(44.6% 0.043 257.281);
+  --color-slate-700: oklch(37.2% 0.044 257.287);
+  --color-slate-800: oklch(27.9% 0.041 260.031);
+  --color-slate-900: oklch(20.8% 0.042 265.755);
+  --color-slate-950: oklch(12.9% 0.042 264.695);
+  --color-gray-50: oklch(98.5% 0.002 247.839);
+  --color-gray-100: oklch(96.7% 0.003 264.542);
+  --color-gray-200: oklch(92.8% 0.006 264.531);
+  --color-gray-300: oklch(87.2% 0.01 258.338);
+  --color-gray-400: oklch(70.7% 0.022 261.325);
+  --color-gray-500: oklch(55.1% 0.027 264.364);
+  --color-gray-600: oklch(44.6% 0.03 256.802);
+  --color-gray-700: oklch(37.3% 0.034 259.733);
+  --color-gray-800: oklch(27.8% 0.033 256.848);
+  --color-gray-900: oklch(21% 0.034 264.665);
+  --color-gray-950: oklch(13% 0.028 261.692);
+  --color-indigo-200: oklch(87% 0.065 274.039);
+  --color-indigo-300: oklch(78.5% 0.115 274.713);
+  --color-indigo-400: oklch(67.3% 0.182 276.935);
+  --color-rose-300: oklch(81% 0.117 11.638);
+  --color-rose-400: oklch(71.2% 0.194 13.428);
+  --color-red-200: oklch(88.5% 0.062 18.334);
+  --color-red-400: oklch(70.4% 0.191 22.216);
+  --color-amber-400: oklch(82.8% 0.189 84.429);
+  --color-emerald-300: oklch(84.5% 0.143 164.978);
+  --color-emerald-400: oklch(76.5% 0.177 163.223);
+  --color-pink-300: oklch(82.3% 0.12 346.018);
+  --color-blue-300: oklch(80.9% 0.105 251.813);
+  --color-sky-400: oklch(74.6% 0.16 232.661);
+}
+
+/* 색이 꽉 찬 배경(버튼, 말풍선, 그라데이션, 이미지 위 어두운 오버레이) 위의 text-white 는 항상 흰색 유지 */
+html[data-theme="light"] [class~="bg-indigo-600"],
+html[data-theme="light"] [class~="bg-indigo-500"],
+html[data-theme="light"] [class~="bg-rose-600"],
+html[data-theme="light"] [class~="bg-rose-500"],
+html[data-theme="light"] [class~="bg-rose-500/80"],
+html[data-theme="light"] [class~="hover:bg-rose-600"],
+html[data-theme="light"] [class~="bg-purple-600"],
+html[data-theme="light"] [class~="bg-blue-600"],
+html[data-theme="light"] [class~="bg-orange-500"],
+html[data-theme="light"] [class~="bg-gradient-to-r"] {
+  --fg-strong: #ffffff;
+  --overlay: #ffffff;
+}
+
+/* 다크에서 흰색이던 글자/테두리/반투명 배경을 변수로 치환 (라이트에서만 값이 달라집니다) */
+html[data-theme="light"] .text-white { color: var(--fg-strong); }
+html[data-theme="light"] .hover\:text-white:hover { color: var(--fg-strong); }
+html[data-theme="light"] .border-white\/5 { border-color: color-mix(in oklab, var(--overlay) 8%, transparent); }
+html[data-theme="light"] .border-white\/10 { border-color: color-mix(in oklab, var(--overlay) 12%, transparent); }
+html[data-theme="light"] .border-white\/40 { border-color: color-mix(in oklab, var(--overlay) 40%, transparent); }
+html[data-theme="light"] .ring-white\/10 { --tw-ring-color: color-mix(in oklab, var(--overlay) 12%, transparent); }
+html[data-theme="light"] .bg-white\/10 { background-color: color-mix(in oklab, var(--overlay) 10%, transparent); }
+html[data-theme="light"] .bg-white\/40 { background-color: color-mix(in oklab, var(--overlay) 40%, transparent); }
+html[data-theme="light"] .hover\:bg-white\/5:hover { background-color: color-mix(in oklab, var(--overlay) 6%, transparent); }
+html[data-theme="light"] .hover\:bg-white\/20:hover { background-color: color-mix(in oklab, var(--overlay) 20%, transparent); }

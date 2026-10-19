@@ -25,11 +25,11 @@ function MovieCard({ movie }) {
         )}
         <div className="absolute inset-x-2 top-2 z-10 flex flex-col items-start gap-1.5">
           <div className="flex w-full items-start justify-between gap-1">
-            <span className="max-w-[65%] rounded-md bg-black/60 px-2 py-1 text-[11px] font-semibold leading-tight text-gray-200">
+            <span className="theme-fixed max-w-[65%] rounded-md bg-black/60 px-2 py-1 text-[11px] font-semibold leading-tight text-gray-200">
               {ageRating ?? '정보 없음'}
             </span>
             <span
-              className={`flex shrink-0 items-center gap-1 rounded-md bg-black/60 px-2 py-1 text-xs font-semibold ${
+              className={`theme-fixed flex shrink-0 items-center gap-1 rounded-md bg-black/60 px-2 py-1 text-xs font-semibold ${
                 averageScore != null ? 'text-amber-400' : 'text-gray-400'
               }`}
             >
@@ -42,7 +42,7 @@ function MovieCard({ movie }) {
             onClick={handleToggleWishlist}
             aria-label={wishlisted ? '찜 해제' : '찜하기'}
             aria-pressed={wishlisted}
-            className={`flex h-7 w-7 items-center justify-center rounded-full bg-black/60 transition hover:bg-black/80 ${
+            className={`theme-fixed flex h-7 w-7 items-center justify-center rounded-full bg-black/60 transition hover:bg-black/80 ${
               wishlisted ? 'text-amber-400' : 'text-gray-200'
             }`}
           >

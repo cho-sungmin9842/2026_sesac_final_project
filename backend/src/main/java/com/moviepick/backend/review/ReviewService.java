@@ -3,6 +3,7 @@ package com.moviepick.backend.review;
 import com.moviepick.backend.auth.User;
 import com.moviepick.backend.auth.UserRepository;
 import com.moviepick.backend.common.ApiException;
+import com.moviepick.backend.movie.MovieTitleResolver;
 import com.moviepick.backend.review.dto.ReviewDto;
 import com.moviepick.backend.review.dto.ReviewRequest;
 import org.springframework.http.HttpStatus;
@@ -18,30 +19,37 @@ public class ReviewService {
 
     private final ReviewRepository reviewRepository;
     private final UserRepository userRepository;
+    private final MovieTitleResolver movieTitleResolver;
 
-    public ReviewService(ReviewRepository reviewRepository, UserRepository userRepository) {
+    public ReviewService(
+            ReviewRepository reviewRepository, UserRepository userRepository, MovieTitleResolver movieTitleResolver
+    ) {
         this.reviewRepository = reviewRepository;
         this.userRepository = userRepository;
+        this.movieTitleResolver = movieTitleResolver;
     }
 
     public List<ReviewDto> list(String movieId) {
-        return reviewRepository.findByMovieIdOrderByCreatedAtDesc(movieId).stream()
-                .map(ReviewDto::from)
-                .toList();
+        return toDtos(reviewRepository.findByMovieIdOrderByCreatedAtDesc(movieId));
     }
 
     public List<ReviewDto> listByUser(Long userId) {
-        return reviewRepository.findByUserIdOrderByCreatedAtDescIdDesc(userId).stream()
-                .map(ReviewDto::from)
+        return toDtos(reviewRepository.findByUserIdOrderByCreatedAtDescIdDesc(userId));
+    }
+
+    // 리뷰에 저장된 영화 제목 대신 movies 테이블의 제목으로 보여줍니다(영화 상세/목록/예매 화면과 같은 제목).
+    private List<ReviewDto> toDtos(List<Review> reviews) {
+        Map<String, String> titles = movieTitleResolver.titlesById(
+                reviews.stream().map(Review::getMovieId).toList());
+        return reviews.stream()
+                .map(review -> ReviewDto.from(review, titles.getOrDefault(review.getMovieId(), review.getMovieTitle())))
                 .toList();
     }
 
     // 관리자 "리뷰 신고 관리" 화면 - DB에 저장된 모든 사용자의 리뷰를 전부 조회합니다.
     public List<ReviewDto> listAllForAdmin(Long adminUserId) {
         requireAdmin(adminUserId);
-        return reviewRepository.findAllByOrderByCreatedAtDesc().stream()
-                .map(ReviewDto::from)
-                .toList();
+        return toDtos(reviewRepository.findAllByOrderByCreatedAtDesc());
     }
 
     // 관리자는 작성자가 아니어도 부적절한 리뷰를 삭제할 수 있어야 하므로, 본인 리뷰로만 제한하는
@@ -60,14 +68,17 @@ public class ReviewService {
             throw new ApiException("이미 작성한 리뷰가 있습니다. 기존 리뷰를 수정해주세요.", HttpStatus.CONFLICT);
         }
         User user = requireUser(userId);
-        Review review = new Review(movieId, request.movieTitle(), user, request.score(), request.content());
+        // 제목은 프론트가 보낸 값 대신 movies 기준으로 저장합니다(movies에 없는 영화일 때만 요청 값 사용).
+        String movieTitle = movieTitleResolver.titleFor(movieId, request.movieTitle());
+        Review review = new Review(movieId, movieTitle, user, request.score(), request.content());
         return ReviewDto.from(reviewRepository.save(review));
     }
 
     public ReviewDto update(String movieId, Long reviewId, Long userId, ReviewRequest request) {
         Review review = requireOwnedReview(movieId, reviewId, userId);
         review.update(request.score(), request.content());
-        return ReviewDto.from(reviewRepository.save(review));
+        Review saved = reviewRepository.save(review);
+        return ReviewDto.from(saved, movieTitleResolver.titleFor(saved.getMovieId(), saved.getMovieTitle()));
     }
 
     public void delete(String movieId, Long reviewId, Long userId) {

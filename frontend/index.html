@@ -5,6 +5,12 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>AI 기반 영화 정보 추천·예매 서비스</title>
+    <!-- 저장된 테마를 React 가 뜨기 전에 먼저 적용해, 라이트 모드 사용자가 첫 화면에서 다크가 번쩍이는 걸 막습니다. -->
+    <script>
+      try {
+        if (localStorage.getItem('moviepick_theme') === 'light') document.documentElement.dataset.theme = 'light'
+      } catch (e) {}
+    </script>
     <!-- 토스페이먼츠 결제위젯 SDK (예매 결제 테스트용) -->
     <script src="https://js.tosspayments.com/v2/standard"></script>
   </head>

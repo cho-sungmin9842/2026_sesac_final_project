@@ -14,6 +14,7 @@ import MovieCard from '../../components/common/MovieCard'
 import WriteReviewDialog from '../MovieDetail/components/WriteReviewDialog'
 import AiTasteReport from './components/AiTasteReport'
 import ProfileHeader from './components/ProfileHeader'
+import BookingCalendar from './components/BookingCalendar'
 import BookingSeatMapDialog from './components/BookingSeatMapDialog'
 import ChangePasswordDialog from './components/ChangePasswordDialog'
 import DeleteAccountDialog from './components/DeleteAccountDialog'
@@ -185,9 +186,45 @@ function SavedGenresDialog({ onClose }) {
 
 const BOOKING_FILTERS = ['상영 예정', '상영 종료']
 
+// "상영 종료" 예매를 월별로 골라 보기 위한 선택지 - 실제로 종료된 예매가 있는 달만, 최근 달부터 만듭니다.
+// value는 상영일의 "YYYY-MM" 앞부분이라 booking.showDate.startsWith(value)로 바로 거를 수 있습니다.
+function buildMonthOptions(pastBookings) {
+  const counts = new Map()
+  for (const booking of pastBookings) {
+    if (!booking.showDate) continue
+    const key = booking.showDate.slice(0, 7)
+    counts.set(key, (counts.get(key) ?? 0) + 1)
+  }
+  return [...counts.entries()]
+    .sort((a, b) => b[0].localeCompare(a[0]))
+    .map(([value, count]) => ({
+      value,
+      count,
+      label: `${value.slice(0, 4)}년 ${Number(value.slice(5, 7))}월`,
+    }))
+}
+
+function BookingMonthSelect({ options, totalCount, value, onChange }) {
+  return (
+    <select
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      aria-label="상영 종료 예매 월 선택"
+      className="rounded-md bg-slate-800 px-3 py-1.5 text-xs font-semibold text-gray-300 hover:bg-slate-700"
+    >
+      <option value="">전체 ({totalCount}건)</option>
+      {options.map((option) => (
+        <option key={option.value} value={option.value}>
+          {option.label} ({option.count}건)
+        </option>
+      ))}
+    </select>
+  )
+}
+
 function BookingFilterTabs({ active, onChange }) {
   return (
-    <div className="mb-4 flex gap-2">
+    <div className="flex gap-2">
       {BOOKING_FILTERS.map((filter) => (
         <button
           key={filter}
@@ -202,6 +239,47 @@ function BookingFilterTabs({ active, onChange }) {
       ))}
     </div>
   )
+}
+
+const BOOKING_VIEWS = ['달력', '목록']
+
+// 예매 내역을 달력으로 볼지 목록으로 볼지 고릅니다(달력이 기본).
+function BookingViewToggle({ active, onChange }) {
+  return (
+    <div className="flex rounded-full bg-slate-900 p-0.5">
+      {BOOKING_VIEWS.map((view) => (
+        <button
+          key={view}
+          type="button"
+          onClick={() => onChange(view)}
+          aria-pressed={active === view}
+          className={`rounded-full px-3 py-1 text-xs font-semibold ${
+            active === view ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:text-gray-200'
+          }`}
+        >
+          {view}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+// 달력을 처음 열 때 보여줄 달 - 가장 임박한 상영 예정 예매가 있는 달, 없으면 가장 최근에 본(끝난) 예매의 달,
+// 예매가 하나도 없으면 이번 달입니다. showDate("YYYY-MM-DD")를 문자열로 잘라 쓰는 이유는 시간대 때문에
+// Date로 바꾸면 달 경계에서 하루씩 밀릴 수 있어서입니다.
+function defaultCalendarMonth(bookings) {
+  const dated = bookings.filter((booking) => booking.showDate)
+  const upcoming = dated
+    .filter((booking) => !isPastShowing(booking))
+    .sort((a, b) => showingDateTime(a) - showingDateTime(b))[0]
+  const latest = [...dated].sort((a, b) => showingDateTime(b) - showingDateTime(a))[0]
+  const target = upcoming ?? latest
+  if (target) {
+    const [year, month] = target.showDate.split('-').map(Number)
+    return { year, monthIndex: month - 1 }
+  }
+  const now = new Date()
+  return { year: now.getFullYear(), monthIndex: now.getMonth() }
 }
 
 function MyBookingList({ bookings, isLoading, onSeatClick, onCancel, emptyMessage }) {
@@ -332,6 +410,10 @@ function MyPage() {
   const { wishlistedIds, refresh: refreshWishlistedIds } = useWishlist()
   const [activeTab, setActiveTab] = useState(TABS[0])
   const [bookingFilter, setBookingFilter] = useState(BOOKING_FILTERS[0])
+  const [bookingView, setBookingView] = useState(BOOKING_VIEWS[0])
+  const [pastMonth, setPastMonth] = useState('') // 목록 > 상영 종료에서 고른 월("YYYY-MM"), ''이면 전체
+  const [calendarMonth, setCalendarMonth] = useState(null) // null 이면 defaultCalendarMonth 를 씁니다
+  const [selectedDate, setSelectedDate] = useState(null) // 달력에서 고른 날짜("YYYY-MM-DD"), null 이면 그 달 전체
   const [bookings, setBookings] = useState([])
   const [bookingsLoading, setBookingsLoading] = useState(true)
   const [wishlist, setWishlist] = useState([])
@@ -490,14 +572,48 @@ function MyPage() {
   // 예매 내역을 "상영 예정"/"상영 종료"로 나눠서 보여주고, 상영 날짜·시간 순으로 정렬합니다 - 상영
   // 예정은 가장 임박한 회차가 먼저 보이도록 오름차순, 상영 종료는 가장 최근에 끝난 회차가 먼저 보이도록
   // 내림차순입니다.
+  // 상영 종료 탭에서는 월별로도 걸러 볼 수 있습니다. 고른 월에 더는 예매가 없으면(목록이 바뀐 경우) 전체로 돌아갑니다.
+  const pastBookings = bookings.filter(isPastShowing)
+  const pastMonthOptions = buildMonthOptions(pastBookings)
+  const activePastMonth = pastMonthOptions.some((option) => option.value === pastMonth) ? pastMonth : ''
   const filteredBookings = bookings
     .filter((booking) => (bookingFilter === '상영 종료' ? isPastShowing(booking) : !isPastShowing(booking)))
+    .filter(
+      (booking) => bookingFilter !== '상영 종료' || !activePastMonth || booking.showDate?.startsWith(activePastMonth),
+    )
     .sort((a, b) => {
       const diff = showingDateTime(a) - showingDateTime(b)
       return bookingFilter === '상영 종료' ? -diff : diff
     })
   const bookingEmptyMessage =
     bookingFilter === '상영 종료' ? '상영 종료된 예매 내역이 없습니다.' : '상영 예정인 예매 내역이 없습니다.'
+
+  // 달력 보기: 달력은 상영 예정/종료를 모두 표시하고, 아래 목록은 고른 날짜(없으면 보고 있는 달 전체)의 예매를
+  // 상영 시각 순으로 보여줍니다. 달력의 달/날짜를 바꾸면 이 목록도 같이 바뀝니다.
+  const activeMonth = calendarMonth ?? defaultCalendarMonth(bookings)
+  const monthPrefix = `${activeMonth.year}-${String(activeMonth.monthIndex + 1).padStart(2, '0')}-`
+  const calendarListBookings = bookings
+    .filter((booking) =>
+      selectedDate ? booking.showDate === selectedDate : booking.showDate?.startsWith(monthPrefix),
+    )
+    .sort((a, b) => showingDateTime(a) - showingDateTime(b))
+  const calendarListTitle = selectedDate
+    ? `${Number(selectedDate.slice(5, 7))}월 ${Number(selectedDate.slice(8, 10))}일 예매 내역`
+    : `${activeMonth.monthIndex + 1}월 예매 내역`
+  const calendarEmptyMessage = selectedDate
+    ? '이 날짜에는 예매 내역이 없습니다.'
+    : `${activeMonth.monthIndex + 1}월에는 예매 내역이 없습니다.`
+
+  const handleChangeMonth = (delta) => {
+    const next = new Date(activeMonth.year, activeMonth.monthIndex + delta, 1)
+    setCalendarMonth({ year: next.getFullYear(), monthIndex: next.getMonth() })
+    setSelectedDate(null)
+  }
+  const handleGoToday = () => {
+    const now = new Date()
+    setCalendarMonth({ year: now.getFullYear(), monthIndex: now.getMonth() })
+    setSelectedDate(null)
+  }
 
   const profile = {
     nickname: user.nickname,
@@ -555,14 +671,57 @@ function MyPage() {
       <div className="mt-6">
         {activeTab === '예매 내역' && (
           <>
-            <BookingFilterTabs active={bookingFilter} onChange={setBookingFilter} />
-            <MyBookingList
-              bookings={filteredBookings}
-              isLoading={bookingsLoading}
-              onSeatClick={setSeatMapBooking}
-              onCancel={handleCancelBooking}
-              emptyMessage={bookingEmptyMessage}
-            />
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+              {bookingView === '목록' ? (
+                <div className="flex flex-wrap items-center gap-2">
+                  <BookingFilterTabs active={bookingFilter} onChange={setBookingFilter} />
+                  {bookingFilter === '상영 종료' && pastMonthOptions.length > 0 && (
+                    <BookingMonthSelect
+                      options={pastMonthOptions}
+                      totalCount={pastBookings.length}
+                      value={activePastMonth}
+                      onChange={setPastMonth}
+                    />
+                  )}
+                </div>
+              ) : (
+                <span />
+              )}
+              <BookingViewToggle active={bookingView} onChange={setBookingView} />
+            </div>
+            {bookingView === '달력' ? (
+              <>
+                <BookingCalendar
+                  bookings={bookings}
+                  year={activeMonth.year}
+                  monthIndex={activeMonth.monthIndex}
+                  selectedDate={selectedDate}
+                  isPast={isPastShowing}
+                  onSelectDate={setSelectedDate}
+                  onChangeMonth={handleChangeMonth}
+                  onGoToday={handleGoToday}
+                />
+                <h3 className="mb-3 mt-6 text-sm font-bold text-white">
+                  {calendarListTitle}
+                  {!bookingsLoading && <span className="ml-2 text-gray-500">{calendarListBookings.length}건</span>}
+                </h3>
+                <MyBookingList
+                  bookings={calendarListBookings}
+                  isLoading={bookingsLoading}
+                  onSeatClick={setSeatMapBooking}
+                  onCancel={handleCancelBooking}
+                  emptyMessage={calendarEmptyMessage}
+                />
+              </>
+            ) : (
+              <MyBookingList
+                bookings={filteredBookings}
+                isLoading={bookingsLoading}
+                onSeatClick={setSeatMapBooking}
+                onCancel={handleCancelBooking}
+                emptyMessage={bookingEmptyMessage}
+              />
+            )}
           </>
         )}
         {activeTab === '찜한 영화' && (

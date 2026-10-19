@@ -6,10 +6,10 @@ const EDGE_BLOCK_SIZE = 3
 
 function seatClassName(state, isAccessible) {
   const accessibleRing = isAccessible ? 'ring-2 ring-blue-400 ring-offset-1 ring-offset-slate-950' : ''
-  if (state === 'reserved') return `bg-slate-700 cursor-not-allowed ${accessibleRing}`
+  if (state === 'reserved') return `bg-[#314158] cursor-not-allowed ${accessibleRing}`
   if (state === 'held') return `bg-purple-600 cursor-not-allowed ${accessibleRing}`
   if (state === 'selected') return `bg-orange-500 ${accessibleRing}`
-  return `bg-gray-300 hover:bg-orange-300 ${accessibleRing}`
+  return `bg-[#d1d5dc] hover:bg-orange-300 ${accessibleRing}`
 }
 
 // seats: [{ id, rowLabel, colNo, seatType, status }] - 실제 screening의 좌석 배치도 그대로입니다.
@@ -36,8 +36,8 @@ function SeatMap({ seats, selectedSeats, onToggleSeat }) {
         </button>
       </div>
 
-      <div className="mx-auto mb-8 w-full max-w-lg rounded-md bg-gray-700 py-2 text-center">
-        <span className="text-sm font-bold tracking-[0.4em] text-white">SCREEN</span>
+      <div className="mx-auto mb-8 w-full max-w-lg rounded-md bg-[#364153] py-2 text-center">
+        <span className="text-sm font-bold tracking-[0.4em] text-[#ffffff]">SCREEN</span>
       </div>
 
       <div className="flex flex-col items-center gap-1.5">
@@ -86,7 +86,7 @@ function SeatMap({ seats, selectedSeats, onToggleSeat }) {
 
       <div className="mt-6 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-xs text-gray-400">
         <span className="flex items-center gap-1.5">
-          <span className="h-4 w-4 rounded-sm bg-gray-300" /> 선택 가능
+          <span className="h-4 w-4 rounded-sm bg-[#d1d5dc]" /> 선택 가능
         </span>
         <span className="flex items-center gap-1.5">
           <span className="h-4 w-4 rounded-sm bg-orange-500" /> 선택됨
@@ -95,10 +95,10 @@ function SeatMap({ seats, selectedSeats, onToggleSeat }) {
           <span className="h-4 w-4 rounded-sm bg-purple-600" /> 다른 사용자 선택 중
         </span>
         <span className="flex items-center gap-1.5">
-          <span className="h-4 w-4 rounded-sm bg-slate-700" /> 예약 완료
+          <span className="h-4 w-4 rounded-sm bg-[#314158]" /> 예약 완료
         </span>
         <span className="flex items-center gap-1.5">
-          <span className="h-4 w-4 rounded-sm bg-gray-300 ring-2 ring-blue-400" /> 장애인석
+          <span className="h-4 w-4 rounded-sm bg-[#d1d5dc] ring-2 ring-blue-400" /> 장애인석
         </span>
       </div>
 

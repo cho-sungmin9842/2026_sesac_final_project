@@ -37,6 +37,13 @@ public class MovieService {
     private static final DateTimeFormatter KMDB_DATE_FORMAT = DateTimeFormatter.ofPattern("yyyyMMdd");
     // KMDB는 한 번에 최대 약 500건까지만 내려줍니다(1000+는 500 에러) - 정렬을 위해 여러 페이지 분량을 한 번에 받아옵니다.
     private static final int KMDB_MAX_LIST_COUNT = 500;
+    // 예매 화면의 "상영중인 영화" 목록(하루 스냅샷)에 담을 최대 편수이자, 그 목록을 KMDB에 요청할 때의 listCount입니다
+    // (2026-10-19 요청 - 이전에는 500, 20편으로 줄였다가 같은 날 16편으로 조정). 상영관 3개·정리시간 30분 기준으로
+    // 하루 필요 시간이 상영관 용량을 넘지 않게 상영중 영화 수를 제한하는 용도입니다. 시뮬레이션상 16편이면 실제
+    // 영화 분포에서 하루의 99.99%가 전부 들어가지만(가장 긴 16편이 매일 상영중인 최악의 경우엔 일요일에 1편이 빠질 수
+    // 있음), 15편이면 그 최악의 경우도 전부 들어갑니다.
+    // 해외 공동제작/제목 없는 항목이 걸러지면 fetchFilledPage가 이어지는 구간을 추가로 받아 이 편수를 채웁니다.
+    static final int NOW_SHOWING_LIST_COUNT = 16;
     // 제목 없는 항목이 껴서 페이지가 모자라면 이어지는 구간을 추가로 더 받아오는데, 그 재시도 최대 횟수입니다
     // (제목 없는 항목은 아주 드물어서 1~2번이면 충분하지만, 여유 있게 잡아둡니다).
     private static final int FILL_PAGE_MAX_ATTEMPTS = 5;
@@ -422,9 +429,9 @@ public class MovieService {
 
         String releaseDte = date.format(KMDB_DATE_FORMAT);
         String releaseDts = date.minusWeeks(4).format(KMDB_DATE_FORMAT);
-        // 날짜마다 실제 개봉작 수(KMDB TotalCount)가 다르므로 고정 건수로 자르지 않고, KMDB 한 번 호출 한도
-        // (KMDB_MAX_LIST_COUNT)까지 요청해서 그날 "상영중"인 영화 전체를 빠짐없이 받아옵니다.
-        FilledPage filled = fetchFilledPage("title", "", null, releaseDts, releaseDte, null, null, KMDB_MAX_LIST_COUNT, 0, null);
+        // 상영관 용량을 넘지 않게 하루 최대 NOW_SHOWING_LIST_COUNT(16)편만 받아옵니다. 최근 4주 내 개봉작이 그보다
+        // 많은 날은 KMDB가 돌려주는 앞쪽 16편만 "상영중"으로 칩니다(정렬 파라미터를 안 보내므로 어떤 16편인지는 KMDB 순서).
+        FilledPage filled = fetchFilledPage("title", "", null, releaseDts, releaseDte, null, null, NOW_SHOWING_LIST_COUNT, 0, null);
         List<MovieSummaryDto> sorted = sortMovies(filled.movies(), "name");
 
         List<NowShowingSnapshot> toSave = new ArrayList<>();

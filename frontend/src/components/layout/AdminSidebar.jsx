@@ -1,5 +1,6 @@
 import { NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../auth/AuthContext'
+import ThemeToggle from '../common/ThemeToggle'
 
 const ADMIN_LINKS = [
   { to: '/admin/reports', label: '리뷰 관리', icon: '🚩' },
@@ -66,9 +67,12 @@ function AdminSidebar({ open, onClose }) {
 
         <div className="border-t border-white/5 px-2 pt-4 text-sm text-gray-400">
           <p className="mb-2 truncate">관리자</p>
-          <button type="button" onClick={handleLogout} className="text-xs hover:text-white">
-            로그아웃
-          </button>
+          <div className="flex items-center justify-between">
+            <button type="button" onClick={handleLogout} className="text-xs hover:text-white">
+              로그아웃
+            </button>
+            <ThemeToggle />
+          </div>
         </div>
       </aside>
     </>
