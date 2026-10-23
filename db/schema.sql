@@ -5,6 +5,11 @@
 -- 그 외 테이블들은 KMDB가 주지 못하는 것(회원, 리뷰, 예매, 찜, 시청완료, 선호 장르 기록)을 저장합니다.
 -- 백엔드 JPA 엔티티(User/Review/Booking/Wishlist/WatchedMovie)와 컬럼이 1:1로 맞춰져 있습니다.
 
+-- 이 파일을 읽는 클라이언트의 문자셋을 utf8mb4로 고정합니다(2026-10-23). 호스트에 설치된 mysql/mariadb 클라이언트
+-- (예: Amazon Linux)는 기본 문자셋이 latin1이라 `mysql < schema.sql`로 직접 넣으면 시드 데이터의 한글이 한 번 더
+-- 인코딩돼 "1관"이 "1ê´€"처럼 깨져 저장됩니다. 이 문장이 있으면 --default-character-set 옵션을 빼먹고 넣어도 안전합니다.
+SET NAMES utf8mb4;
+
 CREATE DATABASE IF NOT EXISTS moviepick
     DEFAULT CHARACTER SET utf8mb4
     DEFAULT COLLATE utf8mb4_unicode_ci;
@@ -192,6 +197,13 @@ CREATE TABLE IF NOT EXISTS theaters (
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
 
 INSERT IGNORE INTO theaters (name) VALUES ('1관'), ('2관'), ('3관');
+
+-- 위 시드가 클라이언트 문자셋 문제로 "1ê´€"처럼 깨져 이미 들어가 있는 DB를 복구합니다(INSERT IGNORE는 기존 행을 고치지
+-- 못합니다). 숫자로 시작하는데 "관"으로 끝나지 않는 행만 "숫자 + 관"으로 바꾸므로, 정상인 DB에서는 아무 행도 건드리지
+-- 않아 이 스크립트를 몇 번 다시 실행해도 안전합니다. 상영관이 10개 이상으로 늘면 LEFT(name, 1) 대신 숫자 추출이 필요합니다.
+UPDATE theaters
+SET name = CONCAT(LEFT(name, 1), '관')
+WHERE name REGEXP '^[0-9]' AND name NOT LIKE '%관';
 
 -- 상영정보. 매주 월요일 자정 배치(ScreeningGenerationService)가 그 주(월~일) 분량을 상영중인 영화 목록으로
 -- 자동 생성합니다. movie_id는 다른 도메인과 동일하게 movies 테이블의 합성 id("{movieId}_{movieSeq}")입니다.
