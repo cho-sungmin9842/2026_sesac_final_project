@@ -4,6 +4,7 @@ import com.moviepick.backend.auth.User;
 import com.moviepick.backend.auth.UserRepository;
 import com.moviepick.backend.booking.dto.BookingDto;
 import com.moviepick.backend.booking.dto.BookingRequest;
+import com.moviepick.backend.booking.dto.BookingTrendPointDto;
 import com.moviepick.backend.booking.dto.SeatChangeRequest;
 import com.moviepick.backend.common.ApiException;
 import com.moviepick.backend.movie.Movie;
@@ -17,6 +18,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -285,6 +287,46 @@ public class BookingService {
         List<Booking> bookings = bookingRepository.findByUserIdOrderByCreatedAtDesc(userId);
         bookings.forEach(this::releaseSeats);
         bookingRepository.deleteAll(bookings);
+    }
+
+    // 관리자 "예매/상영관 현황" 화면의 기간별 예매 추이 그래프 - 오늘을 포함해 최근 days일간, 날짜별
+    // 실제 예매 건수를 돌려줍니다. 예매가 하나도 없던 날도 0건으로 빠짐없이 채워서 내려줘야 그래프가
+    // 중간에 끊기지 않습니다(Repository의 GROUP BY 결과는 데이터가 있는 날짜만 나옵니다).
+    public List<BookingTrendPointDto> getDailyTrendForAdmin(Long adminUserId, int days) {
+        requireAdminUser(adminUserId);
+
+        LocalDate today = LocalDate.now();
+        LocalDate since = today.minusDays(days - 1L);
+        Map<LocalDate, Long> countsByDate = bookingRepository.countDailySince(since.atStartOfDay()).stream()
+                .collect(Collectors.toMap(
+                        row -> toLocalDate(row[0]),
+                        row -> ((Number) row[1]).longValue()));
+
+        List<BookingTrendPointDto> trend = new ArrayList<>();
+        for (LocalDate date = since; !date.isAfter(today); date = date.plusDays(1)) {
+            trend.add(new BookingTrendPointDto(date, countsByDate.getOrDefault(date, 0L)));
+        }
+        return trend;
+    }
+
+    // 네이티브 쿼리의 DATE(created_at) 결과가 드라이버/Hibernate 버전에 따라 java.sql.Date 또는
+    // java.time.LocalDate로 다르게 올 수 있어, 둘 다 안전하게 받아냅니다.
+    private LocalDate toLocalDate(Object value) {
+        if (value instanceof LocalDate localDate) {
+            return localDate;
+        }
+        if (value instanceof java.sql.Date sqlDate) {
+            return sqlDate.toLocalDate();
+        }
+        throw new IllegalStateException("날짜로 변환할 수 없는 값입니다: " + value);
+    }
+
+    private void requireAdminUser(Long userId) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new ApiException("로그인이 필요합니다.", HttpStatus.UNAUTHORIZED));
+        if (!user.isAdmin()) {
+            throw new ApiException("관리자만 이용할 수 있습니다.", HttpStatus.FORBIDDEN);
+        }
     }
 
     private void releaseSeats(Booking booking) {

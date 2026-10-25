@@ -1,8 +1,13 @@
 import { useEffect, useState } from 'react'
+import { useAuth } from '../../auth/AuthContext'
 import { getScreenings, getScreeningSeats } from '../../api/screeningApi'
 import { getNowShowing } from '../../api/movieApi'
+import { getBookingTrend } from '../../api/bookingApi'
 import StatCard from './components/StatCard'
 import AdminSeatMap from './components/AdminSeatMap'
+import BookingTrendChart from './components/BookingTrendChart'
+
+const BOOKING_TREND_DAYS = 14
 
 function toHourMinute(timeStr) {
   return timeStr.slice(0, 5)
@@ -11,6 +16,9 @@ function toHourMinute(timeStr) {
 // 상영관/날짜/회차별 실제 좌석 상태(screenings/seats 테이블)를 조회해 예매 현황을 보여줍니다.
 // 영화 목록은 사용자 예매 탭(BookingListPage)과 완전히 같은 "현재 상영중인 영화"를 그대로 씁니다.
 function AdminScreeningsPage() {
+  const { user } = useAuth()
+  const [bookingTrend, setBookingTrend] = useState([])
+  const [bookingTrendStatus, setBookingTrendStatus] = useState('loading') // loading | ready | error
   const [movies, setMovies] = useState([])
   const [moviesStatus, setMoviesStatus] = useState('loading') // loading | ready | error
   const [selectedMovieId, setSelectedMovieId] = useState('')
@@ -20,6 +28,23 @@ function AdminScreeningsPage() {
   const [occupancy, setOccupancy] = useState([])
   const [occupancyStatus, setOccupancyStatus] = useState('idle') // idle | loading | ready | error
   const [selectedScreeningId, setSelectedScreeningId] = useState(null)
+
+  useEffect(() => {
+    let cancelled = false
+    getBookingTrend(user.id, BOOKING_TREND_DAYS)
+      .then((result) => {
+        if (cancelled) return
+        setBookingTrend(result)
+        setBookingTrendStatus('ready')
+      })
+      .catch(() => {
+        if (cancelled) return
+        setBookingTrendStatus('error')
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [user.id])
 
   useEffect(() => {
     let cancelled = false
@@ -120,6 +145,13 @@ function AdminScreeningsPage() {
         일자별로 상영 영화와 상영관을 선택하면 회차별 예매 현황을 볼 수 있습니다.
       </p>
 
+      <div className="mt-6 rounded-xl bg-slate-900/60 p-4">
+        <h2 className="mb-3 text-sm font-semibold text-gray-200">최근 {BOOKING_TREND_DAYS}일 예매 추이 (전체 영화)</h2>
+        {bookingTrendStatus === 'loading' && <p className="text-sm text-gray-400">불러오는 중...</p>}
+        {bookingTrendStatus === 'error' && <p className="text-sm text-red-400">예매 추이를 불러오지 못했습니다.</p>}
+        {bookingTrendStatus === 'ready' && <BookingTrendChart data={bookingTrend} />}
+      </div>
+
       <div className="mt-6 flex flex-wrap gap-3">
         <select
           value={selectedMovieId}
@@ -165,7 +197,7 @@ function AdminScreeningsPage() {
         </select>
       </div>
 
-      <div className="mt-6 flex gap-4">
+      <div className="mt-6 flex flex-col gap-4 sm:flex-row">
         <StatCard label="전체 좌석(선택한 날짜 전 회차 합계)" value={`${totalCapacity}석`} />
         <StatCard label="예매된 좌석" value={`${totalReserved}석`} />
         <StatCard label="예매율" value={`${occupancyRate}%`} />

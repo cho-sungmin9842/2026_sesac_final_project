@@ -29,3 +29,9 @@ export function changeBookingSeat(userId, bookingId, { fromSeatId, toSeatId }) {
 export function cancelBooking(userId, bookingId) {
   return request(`/api/bookings/${bookingId}`, { method: 'DELETE', userId })
 }
+
+// 관리자 "예매/상영관 현황" 화면의 기간별 예매 추이 그래프 - 오늘 포함 최근 days일, 예매 없는 날도
+// 0건으로 빠짐없이 채워서 내려옵니다.
+export function getBookingTrend(adminUserId, days = 14) {
+  return request(`/api/admin/bookings/trend?days=${days}`, { userId: adminUserId })
+}

@@ -55,7 +55,7 @@ function AdminReportsPage() {
         </span>
       </div>
 
-      <div className="flex gap-4">
+      <div className="flex flex-col gap-4 sm:flex-row">
         <StatCard label="전체 리뷰" value={`${reviews.length}건`} />
         <StatCard label="오늘 작성된 리뷰" value={`${todayCount}건`} />
       </div>

@@ -14,6 +14,12 @@ import WriteReviewDialog from './components/WriteReviewDialog'
 import { normalizeDetail } from './normalizeDetail'
 import ConfirmDialog from '../../components/common/ConfirmDialog'
 import InfoDialog from '../../components/common/InfoDialog'
+import SortDropdown from '../MovieList/components/SortDropdown'
+
+const REVIEW_SORT_OPTIONS = [
+  { value: 'latest', label: '최신순' },
+  { value: 'rating', label: '평점순' },
+]
 
 function MovieDetailPage() {
   const { id } = useParams()
@@ -28,6 +34,7 @@ function MovieDetailPage() {
   const [watched, setWatched] = useState(false)
   const [pendingDeleteReview, setPendingDeleteReview] = useState(null)
   const [deleteErrorMessage, setDeleteErrorMessage] = useState('')
+  const [reviewSort, setReviewSort] = useState('latest')
 
   const wishlisted = wishlistedIds.has(id)
 
@@ -113,6 +120,14 @@ function MovieDetailPage() {
   }
 
   const hasReviewed = reviews.some((review) => review.userId === user?.id)
+
+  const sortedReviews = [...reviews].sort((a, b) => {
+    if (reviewSort === 'rating') {
+      const scoreDiff = (b.score ?? -1) - (a.score ?? -1)
+      if (scoreDiff !== 0) return scoreDiff
+    }
+    return new Date(b.createdAt) - new Date(a.createdAt)
+  })
 
   const scoredReviews = reviews.filter((review) => typeof review.score === 'number')
   const averageScore =
@@ -208,23 +223,28 @@ function MovieDetailPage() {
         <section className="flex-1">
           <div className="mb-4 flex items-center justify-between">
             <h2 className="text-lg font-bold text-gray-100">사용자 리뷰{reviews.length > 0 ? ` (${reviews.length})` : ''}</h2>
-            <button
-              type="button"
-              onClick={() => setDialogOpen(true)}
-              disabled={hasReviewed}
-              title={hasReviewed ? '이미 작성한 리뷰가 있습니다. 기존 리뷰를 수정해주세요.' : undefined}
-              className={`rounded-lg px-4 py-2 text-sm font-semibold ${
-                hasReviewed
-                  ? 'cursor-not-allowed bg-slate-700 text-gray-400'
-                  : 'bg-indigo-600 text-white hover:bg-indigo-500'
-              }`}
-            >
-              리뷰 쓰기
-            </button>
+            <div className="flex items-center gap-2">
+              {reviews.length > 0 && (
+                <SortDropdown value={reviewSort} options={REVIEW_SORT_OPTIONS} onChange={setReviewSort} />
+              )}
+              <button
+                type="button"
+                onClick={() => setDialogOpen(true)}
+                disabled={hasReviewed}
+                title={hasReviewed ? '이미 작성한 리뷰가 있습니다. 기존 리뷰를 수정해주세요.' : undefined}
+                className={`rounded-lg px-4 py-2 text-sm font-semibold ${
+                  hasReviewed
+                    ? 'cursor-not-allowed bg-slate-700 text-gray-400'
+                    : 'bg-indigo-600 text-white hover:bg-indigo-500'
+                }`}
+              >
+                리뷰 쓰기
+              </button>
+            </div>
           </div>
           {reviews.length > 0 ? (
             <ReviewList
-              reviews={reviews}
+              reviews={sortedReviews}
               currentUser={user?.id}
               onEdit={handleReviewEdit}
               onDelete={handleReviewDelete}

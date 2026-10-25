@@ -6,6 +6,8 @@ import ChatBubble from './components/ChatBubble'
 import ChatMovieRecommendation from './components/ChatMovieRecommendation'
 import ChatConversationSidebar from './components/ChatConversationSidebar'
 import ChatSeatStatus from './components/ChatSeatStatus'
+import ConfirmDialog from '../../components/common/ConfirmDialog'
+import InfoDialog from '../../components/common/InfoDialog'
 
 // "지금 상영중인지"는 서버가 자기 시계로(LocalDate.now()) 판단하므로, 문구에 날짜를 직접
 // 적어 보낼 필요가 없습니다 - 화면에 보이는 문구 그대로 보냅니다.
@@ -57,6 +59,8 @@ function AiChatPage() {
   const [input, setInput] = useState('')
   const [isLoadingHistory, setIsLoadingHistory] = useState(true)
   const [isSending, setIsSending] = useState(false)
+  const [pendingDeleteConversationId, setPendingDeleteConversationId] = useState(null)
+  const [deleteErrorMessage, setDeleteErrorMessage] = useState('')
   const nextId = useRef(1)
   const bottomRef = useRef(null)
   const inputRef = useRef(null)
@@ -214,8 +218,13 @@ function AiChatPage() {
   }
 
   // 사이드바 우클릭 메뉴의 "삭제" - 지금 보고 있던 대화방을 지웠으면 화면을 빈 새 대화로 되돌립니다.
-  const handleDeleteConversation = async (conversationId) => {
-    if (!window.confirm('이 대화를 삭제할까요?')) return
+  const handleDeleteConversation = (conversationId) => {
+    setPendingDeleteConversationId(conversationId)
+  }
+
+  const confirmDeleteConversation = async () => {
+    const conversationId = pendingDeleteConversationId
+    setPendingDeleteConversationId(null)
     try {
       await deleteConversation(user.id, conversationId)
       setConversations((prev) => prev.filter((conversation) => conversation.id !== conversationId))
@@ -224,7 +233,7 @@ function AiChatPage() {
         setMessages([GREETING])
       }
     } catch (error) {
-      window.alert(error.message)
+      setDeleteErrorMessage(error.message)
     }
   }
 
@@ -318,6 +327,21 @@ function AiChatPage() {
           </button>
         </form>
       </div>
+
+      {pendingDeleteConversationId != null && (
+        <ConfirmDialog
+          title="대화 삭제"
+          message="이 대화를 삭제할까요?"
+          confirmLabel="삭제"
+          danger
+          onConfirm={confirmDeleteConversation}
+          onCancel={() => setPendingDeleteConversationId(null)}
+        />
+      )}
+
+      {deleteErrorMessage && (
+        <InfoDialog title="대화 삭제 실패" message={deleteErrorMessage} tone="error" onClose={() => setDeleteErrorMessage('')} />
+      )}
     </div>
   )
 }

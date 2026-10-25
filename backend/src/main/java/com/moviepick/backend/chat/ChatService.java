@@ -387,6 +387,20 @@ public class ChatService {
         // 다시 "기억해내라"고 시키는 대신 그 영화를 직접 재조회해서 실제 장르를 가져옵니다(훨씬 안정적입니다).
         ExtractedFilter effectiveFilter = resolveReferenceGenre(filter, fullHistory);
 
+        // "그거"/"그것"/"이거"/"저거"처럼 메시지 전체가 사실상 지시대명사 하나뿐이고, 그걸 가리킬 맥락조차
+        // 없는(직전에 추천/언급된 영화가 전혀 없는) 경우입니다 - 이걸 가만히 두면 Gemini가 뽑아준 조건이
+        // 전부 비어있어 "조건 없는 추천"과 똑같이 처리돼, 사용자는 뭘 가리켰는지 전혀 반영 안 된 엉뚱한
+        // 기본 추천 목록을 받게 됩니다(2026-10-25 실측 - 새 대화에서 "그거"만 보내도 "아무거나 추천해줘"와
+        // 동일한 결과가 나왔습니다). 가리킬 맥락이 있으면(lastRecommendedMovies가 비어있지 않으면) 이미
+        // 정상 동작하므로(예: "그거 몇분이야?") 손대지 않고, 맥락이 전혀 없을 때만 추측 대신 되묻습니다.
+        if (BARE_PRONOUN_HINT.matcher(request.message()).find()
+                && effectiveFilter.genre() == null && effectiveFilter.query() == null
+                && effectiveFilter.year() == null && effectiveFilter.referenceTitle() == null
+                && lastRecommendedMovies(fullHistory).isEmpty()) {
+            String reply = "어떤 영화를 말씀하시는 건지 알려주시겠어요? 영화 제목이나 원하시는 장르를 말씀해주시면 찾아드릴게요.";
+            return persistTurn(user, conversation, request.message(), reply, List.of());
+        }
+
         // "같은 장르의 영화들을 추천해줘"/"더 추천해줘"처럼 이전에 나온 영화를 기준 삼은 "이어가는" 요청만
         // 방금 봤던 영화를 다시 추천해버리는 문제(예: 액션 2편 추천 -> "같은 장르로" -> 그 2편이 6편 중
         // 그대로 다시 포함)가 있어, referenceTitle이 있을 때만 이미 추천했던 영화를 후보에서 뺍니다.
@@ -734,9 +748,16 @@ public class ChatService {
     // "오늘 영화 뭐 있어"처럼 "상영"이라는 단어 없이 "오늘/내일 무슨 영화를 하는지" 물어본 경우도 "오늘
     // 뭐 상영해?"와 똑같이 답해야 합니다 - "상영"이 없으면 위 TODAY_HINT/TOMORROW_HINT 분기를 아예
     // 타지 않아, 거의 같은 질문인데도 문구에 따라 완전히 다른(날짜와 무관한 일반 추천) 답이 나가는
-    // 버그가 있었습니다(2026-10-17 실측).
+    // 버그가 있었습니다(2026-10-17 실측). "오늘 뭐 볼만한거 있나"처럼 "영화"라는 단어조차 없이 캐주얼하게
+    // 물어본 경우도 마찬가지입니다 - "볼만한"은 "오늘/내일 상영하는 것 중에 괜찮은 게 있는지"를 묻는
+    // 매우 구체적인 표현이라 다른 의도와 헷갈릴 위험이 적습니다(2026-10-25 실측 - "볼만한"이 없으면
+    // 이 분기를 못 타고 조건 없는 일반 추천과 똑같은 결과가 나왔습니다).
     private static final java.util.regex.Pattern MOVIE_LISTING_HINT =
-            java.util.regex.Pattern.compile("상영|영화.{0,4}(뭐|뭘).{0,6}있");
+            java.util.regex.Pattern.compile("상영|볼만한|영화.{0,4}(뭐|뭘).{0,6}있");
+    // 메시지 전체가 사실상 지시대명사 하나뿐인 경우("그거 찜해줘"처럼 뒤에 다른 말이 붙으면 매칭하지
+    // 않습니다 - 그런 경우는 각 기능이 맥락으로 알아서 처리합니다).
+    private static final java.util.regex.Pattern BARE_PRONOUN_HINT =
+            java.util.regex.Pattern.compile("^\\s*(그거|그것|이거|이것|저거|저것)\\s*[?!.~]*\\s*$");
     // "어제"/"작일"/"전일"(둘 다 어제의 formal 동의어)로 어제를 가리키는 표현입니다. reply() 상단에서
     // Gemini 호출 전에 PAST_SCREENING_REPLY로 바로 답하므로 여기선 패턴 매칭만 담당합니다.
     private static final java.util.regex.Pattern YESTERDAY_HINT = java.util.regex.Pattern.compile("어제|작일|전일");
@@ -2115,6 +2136,28 @@ public class ChatService {
     private static final java.util.regex.Pattern DATE_FRAGMENT = java.util.regex.Pattern.compile("(\\d{1,2})\\s*[./]\\s*(\\d{1,2})");
     private static final java.util.regex.Pattern THEATER_FRAGMENT = java.util.regex.Pattern.compile("(\\d+)\\s*관");
     private static final java.util.regex.Pattern TIME_FRAGMENT = java.util.regex.Pattern.compile("(\\d{1,2})\\s*:\\s*(\\d{2})");
+    // "18시"/"10시 27분"처럼 콜론 없이 한국어로 말하는 시간 표기입니다. 분은 생략될 수 있고(생략되면
+    // 정각으로 봅니다), "시" 없이 숫자만 있는 경우와 헷갈리지 않도록 반드시 "시"가 붙어 있어야 매칭됩니다.
+    private static final java.util.regex.Pattern KOREAN_TIME_FRAGMENT =
+            java.util.regex.Pattern.compile("(\\d{1,2})\\s*시\\s*(?:(\\d{1,2})\\s*분)?");
+
+    // 좌석 현황/예매의 시간도 "18:00" 콜론 표기뿐 아니라 "18시"·"10시 27분" 같은 한국어 표기까지
+    // 인식해야 합니다 - 실제 사용자는 거의 항상 "~시" 식으로 말하는데, 콜론 표기만 지원해서 좌석현황
+    // 질문과 "상영정보 질문 없이 바로 예매하기"가 사실상 거의 항상 실패하는 문제가 있었습니다
+    // (2026-10-25 실측).
+    private int[] extractScreeningTime(String message) {
+        java.util.regex.Matcher colonMatcher = TIME_FRAGMENT.matcher(message);
+        if (colonMatcher.find()) {
+            return new int[] { Integer.parseInt(colonMatcher.group(1)), Integer.parseInt(colonMatcher.group(2)) };
+        }
+        java.util.regex.Matcher koreanMatcher = KOREAN_TIME_FRAGMENT.matcher(message);
+        if (koreanMatcher.find()) {
+            int hour = Integer.parseInt(koreanMatcher.group(1));
+            int minute = koreanMatcher.group(2) != null ? Integer.parseInt(koreanMatcher.group(2)) : 0;
+            return new int[] { hour, minute };
+        }
+        return null;
+    }
 
     // "인턴 10/18(일) 2관: 19:07 좌석 현황 알려줘"처럼, 영화명과 상영정보(날짜/상영관/시간)를 메시지
     // 자체에 전부 적어야만 답합니다. 직전 대화 맥락(마지막으로 언급된 영화 등)에 기대어 하나라도
@@ -2149,12 +2192,12 @@ public class ChatService {
         }
         int[] dateParts = extractSeatStatusDate(userMessage);
         java.util.regex.Matcher theaterMatcher = THEATER_FRAGMENT.matcher(userMessage);
-        java.util.regex.Matcher timeMatcher = TIME_FRAGMENT.matcher(userMessage);
-        if (dateParts == null || !theaterMatcher.find() || !timeMatcher.find()) {
+        int[] timeParts = extractScreeningTime(userMessage);
+        if (dateParts == null || !theaterMatcher.find() || timeParts == null) {
             return null;
         }
         String theaterLabel = theaterMatcher.group(1) + "관";
-        String timeLabel = "%02d:%02d".formatted(Integer.parseInt(timeMatcher.group(1)), Integer.parseInt(timeMatcher.group(2)));
+        String timeLabel = "%02d:%02d".formatted(timeParts[0], timeParts[1]);
         return screeningRepository.findByMovieIdOrderByDateAscStartTimeAsc(movieId).stream()
                 .filter(s -> s.getDate().getMonthValue() == dateParts[0] && s.getDate().getDayOfMonth() == dateParts[1])
                 .filter(s -> s.getTheater().getName().equals(theaterLabel))
@@ -2171,16 +2214,16 @@ public class ChatService {
         }
 
         java.util.regex.Matcher theaterMatcher = THEATER_FRAGMENT.matcher(userMessage);
-        java.util.regex.Matcher timeMatcher = TIME_FRAGMENT.matcher(userMessage);
+        int[] timeParts = extractScreeningTime(userMessage);
         int[] dateParts = extractSeatStatusDate(userMessage);
-        if (dateParts == null || !theaterMatcher.find() || !timeMatcher.find()) {
+        if (dateParts == null || !theaterMatcher.find() || timeParts == null) {
             return persistTurn(user, conversation, userMessage, SEAT_STATUS_MISSING_INFO_REPLY, List.of());
         }
 
         int month = dateParts[0];
         int day = dateParts[1];
         String theaterLabel = theaterMatcher.group(1) + "관";
-        String timeLabel = "%02d:%02d".formatted(Integer.parseInt(timeMatcher.group(1)), Integer.parseInt(timeMatcher.group(2)));
+        String timeLabel = "%02d:%02d".formatted(timeParts[0], timeParts[1]);
         Screening match = findScreeningMentionedInMessage(userMessage);
 
         if (match == null) {

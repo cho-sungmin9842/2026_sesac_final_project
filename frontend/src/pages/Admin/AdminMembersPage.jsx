@@ -35,7 +35,7 @@ function AdminMembersPage() {
       <h1 className="text-xl font-bold text-white">회원 관리</h1>
       <p className="mt-1 text-sm text-gray-400">가입한 전체 회원의 정보와 활동 현황을 볼 수 있습니다.</p>
 
-      <div className="mt-6 flex gap-4">
+      <div className="mt-6 flex flex-col gap-4 sm:flex-row">
         <StatCard label="전체 회원" value={`${members.length}명`} />
         <StatCard label="관리자" value={`${adminCount}명`} />
         <StatCard label="일반회원" value={`${members.length - adminCount}명`} />

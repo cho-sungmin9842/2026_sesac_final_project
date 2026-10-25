@@ -7,7 +7,7 @@ import { getWatched } from '../../api/watchedApi'
 import { cancelBooking, getMyBookings } from '../../api/bookingApi'
 import { deleteReview, getMyReviews, updateReview } from '../../api/reviewApi'
 import { changePassword, deleteAccount, getPreferredGenres, updatePreferredGenres } from '../../api/userApi'
-import { getGenres, getMovieDetail } from '../../api/movieApi'
+import { getGenres, getMovieDetail, getNowShowing } from '../../api/movieApi'
 import { genreLabel } from '../MovieList/components/filterOptions'
 import { AGE_CATEGORIES } from '../Booking/bookingData'
 import MovieCard from '../../components/common/MovieCard'
@@ -118,14 +118,14 @@ function enrichAsMovie(item) {
     }))
 }
 
-function MoviePosterGrid({ movies, isLoading, emptyMessage }) {
+function MoviePosterGrid({ movies, isLoading, emptyMessage, nowShowingIds }) {
   if (movies.length === 0) {
     return <p className="text-sm text-gray-500">{isLoading ? '불러오는 중...' : emptyMessage}</p>
   }
   return (
     <div className="grid grid-cols-2 gap-6 sm:grid-cols-3 lg:grid-cols-5">
       {movies.map((movie) => (
-        <MovieCard key={movie.id} movie={movie} />
+        <MovieCard key={movie.id} movie={movie} nowShowing={nowShowingIds?.has(movie.id)} />
       ))}
     </div>
   )
@@ -383,21 +383,21 @@ function MyReviewList({ reviews, onEdit, onDelete }) {
             </Link>
             <span className="text-xs text-gray-500">{formatShortDate(review.createdAt)}</span>
           </div>
-          <div className="mt-1 flex items-center justify-between">
+          <div className="mt-1">
             <span className="text-amber-400">
               {'★'.repeat(review.score)}
               <span className="text-gray-600">{'★'.repeat(5 - review.score)}</span>
             </span>
-            <div className="flex gap-2 text-xs text-gray-400">
-              <button type="button" onClick={() => onEdit(review)} className="hover:text-white">
-                수정
-              </button>
-              <button type="button" onClick={() => onDelete(review)} className="hover:text-red-400">
-                삭제
-              </button>
-            </div>
           </div>
           <p className="mt-2 text-sm text-gray-300">{review.content}</p>
+          <div className="mt-2 flex justify-end gap-2 text-xs text-gray-400">
+            <button type="button" onClick={() => onEdit(review)} className="hover:text-white">
+              수정
+            </button>
+            <button type="button" onClick={() => onDelete(review)} className="hover:text-red-400">
+              삭제
+            </button>
+          </div>
         </div>
       ))}
     </div>
@@ -420,6 +420,10 @@ function MyPage() {
   const [watched, setWatched] = useState([])
   const [wishlistMovies, setWishlistMovies] = useState([])
   const [watchedMovies, setWatchedMovies] = useState([])
+  // 찜한 영화 중 "지금 상영중"인 것만 추려서 배지/필터에 씁니다 - 예매 탭과 같은 기준(getNowShowing)이라
+  // 실제로 예매 가능한 것과 항상 일치합니다.
+  const [nowShowingIds, setNowShowingIds] = useState(() => new Set())
+  const [wishlistFilter, setWishlistFilter] = useState('전체')
   const [myReviews, setMyReviews] = useState([])
   const [editingReview, setEditingReview] = useState(null)
   const [preferredGenres, setPreferredGenres] = useState([])
@@ -453,6 +457,12 @@ function MyPage() {
     getGenres()
       .then((list) => {
         if (!cancelled) setSelectableGenres(list)
+      })
+      .catch(() => {})
+
+    getNowShowing()
+      .then((result) => {
+        if (!cancelled) setNowShowingIds(new Set(result.movies.map((movie) => movie.id)))
       })
       .catch(() => {})
 
@@ -568,6 +578,11 @@ function MyPage() {
 
   // 찜 목록 개수/카드 목록은 WishlistContext(실시간 찜 설정/해제 상태)를 기준으로 다시 걸러냅니다.
   const visibleWishlistMovies = wishlistMovies.filter((movie) => wishlistedIds.has(movie.id))
+  // "지금 상영중"만 보기를 고르면 그중에서도 실제로 상영중인 것만 한 번 더 걸러냅니다.
+  const filteredWishlistMovies =
+    wishlistFilter === '지금 상영중'
+      ? visibleWishlistMovies.filter((movie) => nowShowingIds.has(movie.id))
+      : visibleWishlistMovies
 
   // 예매 내역을 "상영 예정"/"상영 종료"로 나눠서 보여주고, 상영 날짜·시간 순으로 정렬합니다 - 상영
   // 예정은 가장 임박한 회차가 먼저 보이도록 오름차순, 상영 종료는 가장 최근에 끝난 회차가 먼저 보이도록
@@ -725,11 +740,38 @@ function MyPage() {
           </>
         )}
         {activeTab === '찜한 영화' && (
-          <MoviePosterGrid
-            movies={visibleWishlistMovies}
-            isLoading={wishlist.length > 0 && wishlistMovies.length === 0}
-            emptyMessage="찜한 영화가 아직 없습니다."
-          />
+          <>
+            {visibleWishlistMovies.length > 0 && (
+              <div className="mb-4 flex gap-2">
+                {['전체', '지금 상영중'].map((filter) => (
+                  <button
+                    key={filter}
+                    type="button"
+                    onClick={() => setWishlistFilter(filter)}
+                    className={`rounded-full px-3 py-1.5 text-xs font-semibold ${
+                      wishlistFilter === filter
+                        ? 'bg-indigo-600 text-white'
+                        : 'bg-slate-800 text-gray-300 hover:bg-slate-700'
+                    }`}
+                  >
+                    {filter}
+                    {filter === '지금 상영중' &&
+                      ` (${visibleWishlistMovies.filter((movie) => nowShowingIds.has(movie.id)).length})`}
+                  </button>
+                ))}
+              </div>
+            )}
+            <MoviePosterGrid
+              movies={filteredWishlistMovies}
+              isLoading={wishlist.length > 0 && wishlistMovies.length === 0}
+              emptyMessage={
+                wishlistFilter === '지금 상영중'
+                  ? '지금 상영중인 찜한 영화가 없습니다.'
+                  : '찜한 영화가 아직 없습니다.'
+              }
+              nowShowingIds={nowShowingIds}
+            />
+          </>
         )}
         {activeTab === '시청완료' && (
           <MoviePosterGrid

@@ -3,7 +3,9 @@ import { genreLabel as translateGenre } from '../../pages/MovieList/components/f
 import { useWishlist } from '../../wishlist/WishlistContext'
 import PosterPlaceholder from './PosterPlaceholder'
 
-function MovieCard({ movie }) {
+// nowShowing: 마이페이지 찜한 영화 목록 전용 - 지금 상영중인(예매 탭과 동일한 기준) 찜한 영화를
+// 눈에 띄게 표시합니다(다른 화면에서는 안 넘겨주므로 평소엔 아무 영향이 없습니다).
+function MovieCard({ movie, nowShowing = false }) {
   const { id, title, year, genres, ageRating, posterUrl, averageScore } = movie
   const genreLabel = genres?.map(translateGenre).join(', ')
   const { wishlistedIds, toggle } = useWishlist()
@@ -55,6 +57,12 @@ function MovieCard({ movie }) {
             </svg>
           </button>
         </div>
+
+        {nowShowing && (
+          <span className="theme-fixed absolute bottom-2 left-2 z-10 rounded-md bg-emerald-600 px-2 py-1 text-[11px] font-semibold text-white">
+            지금 예매 가능
+          </span>
+        )}
       </div>
       <p className="mt-2 text-sm font-semibold text-gray-100">{title}</p>
       <p className="text-xs text-gray-400">

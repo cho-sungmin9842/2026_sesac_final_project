@@ -5,6 +5,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 
 public interface BookingRepository extends JpaRepository<Booking, Long> {
@@ -21,4 +22,11 @@ public interface BookingRepository extends JpaRepository<Booking, Long> {
 
     // 관리자 "회원 관리" 화면 - 회원별 예매 건수.
     long countByUserId(Long userId);
+
+    // 관리자 "예매/상영관 현황" 화면의 기간별 예매 추이 그래프 - 날짜별로 그날 실제 결제 완료된(취소된
+    // 예매는 cancel()에서 행 자체를 삭제하므로 남아있는 행이 곧 유효한 예매입니다) 예매 건수를 셉니다.
+    // 예매가 하나도 없던 날은 결과에 아예 안 나오므로(GROUP BY라 0건인 날을 만들어내지 못함), 서비스
+    // 계층에서 빈 날짜를 0건으로 채워 넣습니다.
+    @Query(value = "SELECT DATE(created_at) AS d, COUNT(*) AS c FROM bookings WHERE created_at >= :since GROUP BY DATE(created_at)", nativeQuery = true)
+    List<Object[]> countDailySince(@Param("since") LocalDateTime since);
 }

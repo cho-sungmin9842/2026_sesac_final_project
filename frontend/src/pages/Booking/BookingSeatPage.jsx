@@ -265,6 +265,10 @@ function BookingSeatPage() {
   // 장애인석(휠체어석)을 새로 선택하려는 경우에만, 실수로 누른 게 아닌지 커스텀 다이얼로그로 한 번 더
   // 확인합니다(이미 선택된 장애인석을 다시 눌러 해제할 때는 확인 없이 바로 처리).
   const toggleSeat = (seat) => {
+    // 결제 확인 다이얼로그에서 이미 "결제 후에는 좌석을 바꿀 수 없다"고 안내했으므로, 결제위젯이 뜬
+    // 뒤에는 좌석 선택 자체를 막습니다 - 안 그러면 인원수와 좌석 수가 달라진 채로 결제를 시도하다가
+    // 서버 쪽에서야 거부당하는 혼란스러운 흐름이 됩니다(2026-10-25 실측).
+    if (showPaymentWidget) return
     const isCurrentlySelected = selectedSeats.includes(seat.id)
     if (!isCurrentlySelected && seat.seatType === 'WHEELCHAIR') {
       setPendingWheelchairSeat(seat)
@@ -283,6 +287,8 @@ function BookingSeatPage() {
   }
 
   const updateTicketCount = (key, delta) => {
+    // 좌석 선택과 같은 이유로, 결제위젯이 뜬 뒤에는 인원수도 바꿀 수 없게 막습니다.
+    if (showPaymentWidget) return
     if (disallowedCategories.includes(key)) return
     // "15세이상관람가" 영화는 청소년(만 12~18세) 중 만 12~14세는 관람할 수 없어서, 청소년 인원을 늘릴
     // 때마다 먼저 확인 팝업을 띄웁니다(줄일 때는 경고가 필요 없어 delta > 0일 때만).
@@ -417,7 +423,9 @@ function BookingSeatPage() {
                   </div>
                 </div>
 
-                <div className="border-b border-white/10 py-6">
+                <div
+                  className={`border-b border-white/10 py-6 ${showPaymentWidget ? 'pointer-events-none opacity-60' : ''}`}
+                >
                   <div className="mb-3 flex items-center gap-2">
                     <h2 className="text-sm font-semibold text-gray-400">인원 선택</h2>
                     <span
@@ -454,7 +462,7 @@ function BookingSeatPage() {
                           <div className="flex items-center gap-3">
                             <button
                               type="button"
-                              disabled={disallowed}
+                              disabled={disallowed || showPaymentWidget}
                               onClick={() => updateTicketCount(category.key, -1)}
                               className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-800 text-gray-300 hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
                             >
@@ -463,7 +471,7 @@ function BookingSeatPage() {
                             <span className="w-4 text-center text-sm font-semibold">{ticketCounts[category.key]}</span>
                             <button
                               type="button"
-                              disabled={disallowed}
+                              disabled={disallowed || showPaymentWidget}
                               onClick={() => updateTicketCount(category.key, 1)}
                               className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-800 text-gray-300 hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
                             >
@@ -481,7 +489,7 @@ function BookingSeatPage() {
                   )}
                 </div>
 
-                <div className="py-8">
+                <div className={`py-8 ${showPaymentWidget ? 'pointer-events-none opacity-60' : ''}`}>
                   <SeatMap seats={seats} selectedSeats={selectedSeats} onToggleSeat={toggleSeat} />
                 </div>
 
