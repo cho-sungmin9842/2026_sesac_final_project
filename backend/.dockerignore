@@ -1,0 +1,31 @@
+# 이미지 빌드 컨텍스트에서 제외할 것들
+
+# ★ 가장 중요: 실제 API 키(KMDB, Gemini)가 들어 있는 파일입니다. src/main/resources 안에 있어서 제외하지 않으면
+#   jar 에 포함되고, 그 이미지를 Docker Hub 에 올리면 키가 그대로 노출됩니다. 키는 실행할 때 환경변수로 넘깁니다.
+**/application-local.yml
+**/application-local.yaml
+**/application-local.properties
+**/*.env
+**/.env*
+
+# 로컬 빌드 결과물/캐시(컨테이너 안에서 새로 빌드합니다)
+build
+.gradle
+out
+bin
+
+# IDE / 문서 / git
+.idea
+*.iml
+.vscode
+.git
+.gitignore
+.gitattributes
+HELP.md
+README.md
+
+# 테스트 소스(이미지 빌드에서 테스트를 돌리지 않으므로 컨텍스트에서 뺍니다)
+src/test
+
+Dockerfile
+.dockerignore
