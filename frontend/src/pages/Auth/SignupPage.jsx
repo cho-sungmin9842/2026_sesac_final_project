@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../auth/AuthContext'
 import AuthShell from './components/AuthShell'
+import { josa } from '../../utils/korean'
 
 // 아이디: 영문+숫자 조합만(한글/공백/특수문자 불가, 영문과 숫자 둘 다 포함).
 const USERNAME_PATTERN = /^(?=.*[A-Za-z])(?=.*\d)[A-Za-z0-9]+$/
@@ -33,7 +34,8 @@ function SignupPage() {
     if (!password) missing.push('비밀번호')
     if (!passwordConfirm) missing.push('비밀번호 확인')
     if (missing.length > 0) {
-      setError(`${missing.join(', ')}을(를) 입력해주세요.`)
+      const lastMissing = missing[missing.length - 1]
+      setError(`${missing.join(', ')}${josa(lastMissing, ['을', '를'])} 입력해주세요.`)
       return
     }
 

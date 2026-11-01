@@ -2,6 +2,7 @@ package com.moviepick.backend.kmdb;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
 
 /**
  * KMDB Open API 응답 값 정제 유틸리티.
@@ -109,6 +110,61 @@ public final class KmdbTextUtils {
         return "under120".equals(runtimeFilter)
                 ? runtimeMinutes < RUNTIME_FILTER_THRESHOLD_MINUTES
                 : runtimeMinutes >= RUNTIME_FILTER_THRESHOLD_MINUTES;
+    }
+
+    // 영화 목록 화면의 "연령등급" 필터 버킷. KMDB 원본 ageRating(=item.getRating()을 clean()한 값)은
+    // 시대/영화마다 표기가 제각각이라(2026-11-01 실측: 전체 52,566건 중 68%가 등급 정보 자체가 없고,
+    // 나머지도 "12세관람가"/"12세이상관람가"/"중학생이상"/"국민학생관람불가"처럼 사실상 같은 등급을
+    // 가리키는 표기가 20종 넘게 섞여 있음 - 옛날 영화는 "연소자불가"/"미성년자관람불가" 같은 옛 등급제
+    // 용어까지 씀), 화면/필터용으로 5개 버킷(전체관람가/12세/15세/청소년관람불가/정보없음)으로
+    // 정규화합니다. "국민학생이상관람가"처럼 "~부터 허용"을 긍정문으로 표현한 옛 표기는 그 반대
+    // 표기("국민학생관람불가")와 같은 등급을 가리키는 것으로 보고 묶었습니다.
+    public static final String AGE_RATING_GENERAL = "general";
+    public static final String AGE_RATING_12 = "age12";
+    public static final String AGE_RATING_15 = "age15";
+    public static final String AGE_RATING_19 = "age19";
+    public static final String AGE_RATING_UNKNOWN = "unknown";
+
+    private static final Set<String> AGE_RATING_GENERAL_VALUES = Set.of(
+            "전체관람가", "연소자관람가", "국민학생이상관람가", "미성년자관람가", "모두관람가", "7세이상시청가(TV)"
+    );
+    private static final Set<String> AGE_RATING_12_VALUES = Set.of(
+            "12세관람가", "12세이상관람가", "중학생이상", "중학생가", "국민학생관람불가", "12세미만불가"
+    );
+    private static final Set<String> AGE_RATING_15_VALUES = Set.of(
+            "15세관람가", "15세이상관람가", "고등학생이상관람가", "고등학생가", "15세미만불가"
+    );
+    private static final Set<String> AGE_RATING_19_VALUES = Set.of(
+            "19세관람가(청소년관람불가)", "미성년자관람불가", "청소년관람불가", "연소자불가", "19세미만불가", "제한상영가"
+    );
+
+    public static String normalizeAgeRatingCategory(String ageRating) {
+        String cleaned = clean(ageRating);
+        if (cleaned == null) {
+            return AGE_RATING_UNKNOWN;
+        }
+        if (AGE_RATING_GENERAL_VALUES.contains(cleaned)) {
+            return AGE_RATING_GENERAL;
+        }
+        if (AGE_RATING_12_VALUES.contains(cleaned)) {
+            return AGE_RATING_12;
+        }
+        if (AGE_RATING_15_VALUES.contains(cleaned)) {
+            return AGE_RATING_15;
+        }
+        if (AGE_RATING_19_VALUES.contains(cleaned)) {
+            return AGE_RATING_19;
+        }
+        return AGE_RATING_UNKNOWN;
+    }
+
+    // ageRatingFilter는 normalizeAgeRatingCategory가 돌려주는 코드(general/age12/age15/age19/unknown)
+    // 중 하나거나(필터 없음은 null/빈 값) 들어옵니다.
+    public static boolean matchesAgeRatingFilter(String ageRating, String ageRatingFilter) {
+        if (ageRatingFilter == null || ageRatingFilter.isBlank()) {
+            return true;
+        }
+        return ageRatingFilter.equals(normalizeAgeRatingCategory(ageRating));
     }
 
     private static List<String> splitBy(String value, String regex) {

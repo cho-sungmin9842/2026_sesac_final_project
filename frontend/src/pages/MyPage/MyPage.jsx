@@ -7,8 +7,9 @@ import { getWatched } from '../../api/watchedApi'
 import { cancelBooking, getMyBookings } from '../../api/bookingApi'
 import { deleteReview, getMyReviews, updateReview } from '../../api/reviewApi'
 import { changePassword, deleteAccount, getPreferredGenres, updatePreferredGenres } from '../../api/userApi'
-import { getGenres, getMovieDetail, getNowShowing } from '../../api/movieApi'
+import { getGenres, getNowShowing } from '../../api/movieApi'
 import { genreLabel } from '../MovieList/components/filterOptions'
+import { enrichAsMovie } from '../../utils/enrichMovie'
 import { AGE_CATEGORIES } from '../Booking/bookingData'
 import MovieCard from '../../components/common/MovieCard'
 import WriteReviewDialog from '../MovieDetail/components/WriteReviewDialog'
@@ -92,30 +93,6 @@ function buildTasteReportText(genres) {
     return '아직 선호 장르를 선택하지 않으셨어요. 아래에서 좋아하는 장르를 선택하면 홈 화면 추천에 반영돼요.'
   }
   return `선호 장르로 ${genres.map(genreLabel).join(', ')}을(를) 선택하셨어요. 홈 화면의 "취향저격 신작"에서 관련 영화를 우선적으로 보여드릴게요.`
-}
-
-// 찜한 영화/시청완료에는 movieId·movieTitle·posterUrl만 저장돼 있어서, 목록/검색과 같은 카드 형태(연령등급·평점
-// 배지, 장르)로 보여주려면 KMDB 상세를 다시 조회해 MovieCard가 기대하는 모양으로 채워야 합니다.
-function enrichAsMovie(item) {
-  return getMovieDetail(item.movieId)
-    .then((detail) => ({
-      id: item.movieId,
-      title: detail.title,
-      year: detail.year,
-      genres: detail.genres,
-      ageRating: detail.ageRating,
-      posterUrl: detail.posterUrl ?? item.posterUrl,
-      averageScore: detail.averageScore,
-    }))
-    .catch(() => ({
-      id: item.movieId,
-      title: item.movieTitle,
-      year: null,
-      genres: [],
-      ageRating: null,
-      posterUrl: item.posterUrl,
-      averageScore: null,
-    }))
 }
 
 function MoviePosterGrid({ movies, isLoading, emptyMessage, nowShowingIds }) {
@@ -566,13 +543,21 @@ function MyPage() {
     }
   }
 
-  const handleReviewDelete = async (review) => {
-    if (!window.confirm('이 리뷰를 삭제할까요?')) return
+  const [pendingDeleteReview, setPendingDeleteReview] = useState(null)
+  const [reviewDeleteErrorMessage, setReviewDeleteErrorMessage] = useState('')
+
+  const handleReviewDelete = (review) => {
+    setPendingDeleteReview(review)
+  }
+
+  const confirmReviewDelete = async () => {
+    const review = pendingDeleteReview
+    setPendingDeleteReview(null)
     try {
       await deleteReview(review.movieId, review.id, user.id)
       refreshMyReviews()
     } catch (error) {
-      window.alert(error.message)
+      setReviewDeleteErrorMessage(error.message)
     }
   }
 
@@ -818,6 +803,26 @@ function MyPage() {
 
       {cancelErrorMessage && (
         <InfoDialog title="예매 취소 실패" message={cancelErrorMessage} tone="error" onClose={() => setCancelErrorMessage('')} />
+      )}
+
+      {pendingDeleteReview && (
+        <ConfirmDialog
+          title="리뷰 삭제"
+          message="이 리뷰를 삭제할까요?"
+          confirmLabel="삭제"
+          danger
+          onConfirm={confirmReviewDelete}
+          onCancel={() => setPendingDeleteReview(null)}
+        />
+      )}
+
+      {reviewDeleteErrorMessage && (
+        <InfoDialog
+          title="리뷰 삭제 실패"
+          message={reviewDeleteErrorMessage}
+          tone="error"
+          onClose={() => setReviewDeleteErrorMessage('')}
+        />
       )}
     </div>
   )

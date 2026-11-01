@@ -35,6 +35,11 @@ function toHourMinute(timeStr) {
 // 날짜+시간을 합쳐서 접속 시점과 비교합니다(백엔드 BookingService의 같은 기준과 맞춰야 합니다).
 const BOOKING_CUTOFF_MINUTES = 30
 
+// 1회 예매당 선택 가능한 인원(전체 구분 합계) 상한 - 실제 멀티플렉스도 보통 9~10명으로 제한합니다.
+// 상영관 좌석 수에 비하면 충분히 작으면서도 소규모 단체 예매에는 지장이 없는 값입니다. 백엔드
+// BookingService의 같은 기준과 맞춰야 합니다.
+const MAX_TICKETS_PER_BOOKING = 10
+
 function isBookable(screening) {
   const startDateTime = new Date(`${screening.date}T${screening.startTime}`)
   const cutoff = new Date(Date.now() + BOOKING_CUTOFF_MINUTES * 60 * 1000)
@@ -290,6 +295,8 @@ function BookingSeatPage() {
     // 좌석 선택과 같은 이유로, 결제위젯이 뜬 뒤에는 인원수도 바꿀 수 없게 막습니다.
     if (showPaymentWidget) return
     if (disallowedCategories.includes(key)) return
+    // 전체 구분 합계가 이미 상한에 도달했으면 더 늘릴 수 없습니다(줄이는 건 항상 허용).
+    if (delta > 0 && totalTickets >= MAX_TICKETS_PER_BOOKING) return
     // "15세이상관람가" 영화는 청소년(만 12~18세) 중 만 12~14세는 관람할 수 없어서, 청소년 인원을 늘릴
     // 때마다 먼저 확인 팝업을 띄웁니다(줄일 때는 경고가 필요 없어 delta > 0일 때만).
     if (key === 'teen' && delta > 0 && requiresTeenAgeWarning(movie.ageRating)) {
@@ -300,6 +307,10 @@ function BookingSeatPage() {
   }
 
   const confirmTeenAgeIncrease = () => {
+    if (totalTickets >= MAX_TICKETS_PER_BOOKING) {
+      setShowTeenAgeConfirm(false)
+      return
+    }
     setTicketCounts((prev) => ({ ...prev, teen: prev.teen + 1 }))
     setShowTeenAgeConfirm(false)
   }
@@ -339,6 +350,7 @@ function BookingSeatPage() {
       refreshSeats()
     } catch (error) {
       setResultDialog({ title: '결제에 실패했어요', message: error.message, tone: 'error' })
+      setShowPaymentWidget(false)
       refreshSeats()
     } finally {
       setIsSubmitting(false)
@@ -436,6 +448,11 @@ function BookingSeatPage() {
                       {TIME_PERIOD_LABELS[timePeriod]} · {holidayPricing ? '주말·공휴일 요금' : '주중 요금'}
                     </span>
                   </div>
+                  {totalTickets >= MAX_TICKETS_PER_BOOKING && (
+                    <p className="mb-3 text-xs text-rose-400">
+                      1회 예매는 최대 {MAX_TICKETS_PER_BOOKING}명까지 가능해요.
+                    </p>
+                  )}
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     {AGE_CATEGORIES.map((category) => {
                       const disallowed = disallowedCategories.includes(category.key)
@@ -471,7 +488,7 @@ function BookingSeatPage() {
                             <span className="w-4 text-center text-sm font-semibold">{ticketCounts[category.key]}</span>
                             <button
                               type="button"
-                              disabled={disallowed || showPaymentWidget}
+                              disabled={disallowed || showPaymentWidget || totalTickets >= MAX_TICKETS_PER_BOOKING}
                               onClick={() => updateTicketCount(category.key, 1)}
                               className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-800 text-gray-300 hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
                             >

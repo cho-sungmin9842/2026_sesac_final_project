@@ -6,6 +6,7 @@ import { getBookingTrend } from '../../api/bookingApi'
 import StatCard from './components/StatCard'
 import AdminSeatMap from './components/AdminSeatMap'
 import BookingTrendChart from './components/BookingTrendChart'
+import HorizontalScroll from '../../components/common/HorizontalScroll'
 
 const BOOKING_TREND_DAYS = 14
 
@@ -214,7 +215,7 @@ function AdminScreeningsPage() {
           <p className="text-sm text-red-400">예매 현황을 불러오지 못했습니다. 다시 시도해주세요.</p>
         )}
         {occupancyStatus === 'ready' && occupancy.length > 0 && (
-          <div className="overflow-x-auto">
+          <HorizontalScroll>
           <table className="w-full min-w-[480px] text-left text-sm">
             <thead>
               <tr className="border-b border-white/10 text-gray-400">
@@ -249,7 +250,7 @@ function AdminScreeningsPage() {
               ))}
             </tbody>
           </table>
-          </div>
+          </HorizontalScroll>
         )}
       </div>
 

@@ -1,3 +1,5 @@
+import HorizontalScroll from '../../../components/common/HorizontalScroll'
+
 function formatDate(dateTimeStr) {
   const date = new Date(dateTimeStr)
   return date.toLocaleDateString('ko-KR', { year: 'numeric', month: '2-digit', day: '2-digit' })
@@ -8,7 +10,7 @@ function formatDate(dateTimeStr) {
 // 컬럼이 많아 좁은 화면(모바일)에서는 표가 찌그러지므로, 가로 스크롤로 보게끔 감쌉니다.
 function MemberTable({ members }) {
   return (
-    <div className="overflow-x-auto">
+    <HorizontalScroll>
       <table className="w-full min-w-[640px] text-left text-sm">
         <thead>
           <tr className="border-b border-white/5 text-gray-400">
@@ -46,7 +48,7 @@ function MemberTable({ members }) {
           ))}
         </tbody>
       </table>
-    </div>
+    </HorizontalScroll>
   )
 }
 

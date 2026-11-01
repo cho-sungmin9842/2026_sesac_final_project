@@ -19,6 +19,7 @@ import com.moviepick.backend.chat.dto.ChatRequestDto;
 import com.moviepick.backend.chat.dto.ChatResponseDto;
 import com.moviepick.backend.chat.dto.SeatStatusDto;
 import com.moviepick.backend.common.ApiException;
+import com.moviepick.backend.common.KoreanJosa;
 import com.moviepick.backend.movie.MovieGenres;
 import com.moviepick.backend.movie.MovieService;
 import com.moviepick.backend.movie.dto.ActorDto;
@@ -587,7 +588,7 @@ public class ChatService {
             return java.util.Optional.empty();
         }
         List<MovieSummaryDto> candidates =
-                movieService.search(movieTitle, List.of(), null, null, "latest", 1, EXACT_TITLE_SEARCH_POOL, "title").movies();
+                movieService.search(movieTitle, List.of(), null, null, null, "latest", 1, EXACT_TITLE_SEARCH_POOL, "title").movies();
         return candidates.stream().filter(movie -> titleMatches(movie.title(), movieTitle)).findFirst();
     }
 
@@ -655,7 +656,11 @@ public class ChatService {
         }
 
         String reply = "'%s' 상영 정보예요.\n%s".formatted(movie.title(), describeScreenings(screenings));
-        return persistTurn(user, conversation, userMessage, reply, List.of(movie));
+        // 회차가 하나뿐이면 모호함이 없으니, 바로 이어서 "그거 예매해줘"라고 해도 이 회차를 가리키는
+        // 것으로 알아들을 수 있게 screeningId를 함께 기록합니다(2개 이상이면 어떤 회차인지 알 수 없어
+        // 기록하지 않습니다 - lastSeatStatusScreeningId가 null이면 기존처럼 다시 물어봅니다).
+        Long screeningId = screenings.size() == 1 ? screenings.get(0).getId() : null;
+        return persistTurn(user, conversation, userMessage, reply, List.of(movie), screeningId);
     }
 
     private static final java.util.regex.Pattern KOREAN_DATE_HINT =
@@ -997,12 +1002,29 @@ public class ChatService {
     private ChatResponseDto persistTurn(
             User user, ChatConversation conversation, String userMessage, String reply, List<MovieSummaryDto> movies
     ) {
-        return persistTurn(user, conversation, userMessage, reply, movies, null);
+        return persistTurn(user, conversation, userMessage, reply, movies, (SeatStatusDto) null);
     }
 
     private ChatResponseDto persistTurn(
             User user, ChatConversation conversation, String userMessage, String reply,
             List<MovieSummaryDto> movies, SeatStatusDto seatStatus
+    ) {
+        Long screeningId = seatStatus == null ? null : seatStatus.screeningId();
+        return persistTurnCore(user, conversation, userMessage, reply, movies, seatStatus, screeningId);
+    }
+
+    // 상영정보 질문처럼 좌석 현황 카드(seatStatus)는 보여주지 않되, 회차가 하나로 특정될 때 "그거
+    // 예매해줘"가 바로 이어받을 수 있도록 screeningId만 기록하고 싶을 때 씁니다.
+    private ChatResponseDto persistTurn(
+            User user, ChatConversation conversation, String userMessage, String reply,
+            List<MovieSummaryDto> movies, Long screeningId
+    ) {
+        return persistTurnCore(user, conversation, userMessage, reply, movies, null, screeningId);
+    }
+
+    private ChatResponseDto persistTurnCore(
+            User user, ChatConversation conversation, String userMessage, String reply,
+            List<MovieSummaryDto> movies, SeatStatusDto seatStatus, Long screeningId
     ) {
         // AI 추천의 모든 응답이 여기 한 곳을 거쳐 나가므로, 영화 목록이 섞여 있으면 항상 제목 가나다
         // (오름차순) 순으로 정렬해서 화면 카드 그리드에 일관된 순서로 보여줍니다(추천/찜 목록/시청완료
@@ -1010,7 +1032,6 @@ public class ChatService {
         List<MovieSummaryDto> sortedMovies = movies.stream()
                 .sorted(java.util.Comparator.comparing(MovieSummaryDto::title))
                 .toList();
-        Long screeningId = seatStatus == null ? null : seatStatus.screeningId();
         chatMessageRepository.save(new ChatMessage(user, conversation.getId(), "user", userMessage, null, null));
         chatMessageRepository.save(new ChatMessage(user, conversation.getId(), "ai", reply, joinIds(sortedMovies), screeningId));
         conversation.touch();
@@ -1355,7 +1376,7 @@ public class ChatService {
                 movies = searchNonEmpty(filter.query(), genres, filter.year(), "director", searchPageSize);
             }
         } else {
-            movies = movieService.search("", genres, filter.year(), null, "latest", 1, searchPageSize, "title").movies();
+            movies = movieService.search("", genres, filter.year(), null, null, "latest", 1, searchPageSize, "title").movies();
         }
 
         return movies.stream()
@@ -1400,7 +1421,7 @@ public class ChatService {
     }
 
     private List<MovieSummaryDto> searchNonEmpty(String query, List<String> genres, String year, String field, int pageSize) {
-        return movieService.search(query, genres, year, null, "latest", 1, pageSize, field).movies();
+        return movieService.search(query, genres, year, null, null, "latest", 1, pageSize, field).movies();
     }
 
     // "범죄도시 추천해줘"처럼 영화 제목으로 추천을 요청하면, movie_question/pricing_info 등 다른 intent와
@@ -1413,7 +1434,7 @@ public class ChatService {
     // "latest" 정렬상 정확히 같은 제목의 영화가 뒤쪽에 있어도 놓치지 않습니다.
     private List<MovieSummaryDto> exactTitleSearch(String referenceTitle, List<String> genres, String year) {
         List<MovieSummaryDto> candidates =
-                movieService.search(referenceTitle, genres, year, null, "latest", 1, EXACT_TITLE_SEARCH_POOL, "title").movies();
+                movieService.search(referenceTitle, genres, year, null, null, "latest", 1, EXACT_TITLE_SEARCH_POOL, "title").movies();
         return candidates.stream().filter(movie -> titleMatches(movie.title(), referenceTitle)).toList();
     }
 
@@ -1432,7 +1453,9 @@ public class ChatService {
         // 추천 순서는 그대로 두고), 이 문장 안의 제목 나열도 같은 순서여야 카드 순서와 안 맞는 문제가
         // 없습니다(2026-10-14 실측).
         String titles = candidates.stream().map(MovieSummaryDto::title).sorted().collect(Collectors.joining(", "));
-        String suffix = candidates.size() > 1 ? "등 %d편을 찾았어요!".formatted(candidates.size()) : "을(를) 찾았어요!";
+        String suffix = candidates.size() > 1
+                ? "등 %d편을 찾았어요!".formatted(candidates.size())
+                : KoreanJosa.pick(titles, "을", "를") + " 찾았어요!";
         String guide = "영화 포스터를 클릭하시면 자세한 영화 정보를 보실 수 있습니다.";
         // "지금 상영중인 영화 찾아줘"처럼 다른 조건 없이 상영중 제한만 있었으면, 예전 handleNowShowingRequest
         // 전용 분기가 쓰던 문구를 그대로 유지합니다(장르/키워드 등 다른 조건이 같이 있으면 그 조건을
@@ -1747,7 +1770,7 @@ public class ChatService {
         }
         String titles = movies.stream().map(MovieSummaryDto::title).collect(Collectors.joining(", "));
         String reply = "영화 %s %s 찜했습니다."
-                .formatted(titles, movies.size() > 1 ? "등 %d편을".formatted(movies.size()) : "을(를)");
+                .formatted(titles, movies.size() > 1 ? "등 %d편을".formatted(movies.size()) : KoreanJosa.pick(titles, "을", "를"));
         // 찜하기 확인 메시지에는 영화 카드 목록을 다시 붙이지 않습니다 - movies를 그대로 넘기면
         // ChatMovieRecommendation이 방금 봤던 추천 카드 그리드를 통째로 다시 그려서, 화면상 방금 추천
         // 답변과 거의 구분이 안 되는 문제가 있었습니다(사용자가 "안 고쳐졌다"고 재차 신고한 원인).
@@ -1783,7 +1806,7 @@ public class ChatService {
         boolean removedAll = Boolean.TRUE.equals(filter.targetAll()) && matched.size() == wishlist.size();
         String reply = removedAll
                 ? "찜한 영화 %d편을 전부 찜 해제했습니다.".formatted(matched.size())
-                : "영화 %s %s 찜 해제했습니다.".formatted(titles, matched.size() > 1 ? "등 %d편을".formatted(matched.size()) : "을(를)");
+                : "영화 %s %s 찜 해제했습니다.".formatted(titles, matched.size() > 1 ? "등 %d편을".formatted(matched.size()) : KoreanJosa.pick(titles, "을", "를"));
         return persistTurn(user, conversation, userMessage, reply, List.of());
     }
 
@@ -1919,7 +1942,8 @@ public class ChatService {
         if (!hasMovie) missing.add("영화명");
         if (!hasScore) missing.add("평점");
         if (!hasContent) missing.add("리뷰 내용");
-        String reply = "%s을(를) 입력해주세요.".formatted(String.join(", ", missing));
+        String reply = "%s%s 입력해주세요."
+                .formatted(String.join(", ", missing), KoreanJosa.pick(missing.get(missing.size() - 1), "을", "를"));
         return persistTurn(user, conversation, userMessage, reply, movieContext);
     }
 
@@ -2059,7 +2083,7 @@ public class ChatService {
         }
         String titles = movies.stream().map(MovieSummaryDto::title).collect(Collectors.joining(", "));
         String reply = "영화 %s %s 시청완료 목록에 추가했습니다."
-                .formatted(titles, movies.size() > 1 ? "등 %d편을".formatted(movies.size()) : "을(를)");
+                .formatted(titles, movies.size() > 1 ? "등 %d편을".formatted(movies.size()) : KoreanJosa.pick(titles, "을", "를"));
         return persistTurn(user, conversation, userMessage, reply, List.of());
     }
 
@@ -2088,7 +2112,7 @@ public class ChatService {
         }
         String titles = matched.stream().map(WatchedMovieDto::movieTitle).collect(Collectors.joining(", "));
         String reply = "영화 %s %s 시청완료 목록에서 삭제했습니다."
-                .formatted(titles, matched.size() > 1 ? "등 %d편을".formatted(matched.size()) : "을(를)");
+                .formatted(titles, matched.size() > 1 ? "등 %d편을".formatted(matched.size()) : KoreanJosa.pick(titles, "을", "를"));
         return persistTurn(user, conversation, userMessage, reply, List.of());
     }
 
@@ -2119,15 +2143,19 @@ public class ChatService {
         }
 
         PreferredGenresDto updated = userService.updatePreferredGenres(user.getId(), mentionedGenres);
-        String reply = "선호 장르를 %s(으)로 변경했습니다.".formatted(String.join(", ", updated.genres()));
+        List<String> updatedGenres = updated.genres();
+        String reply = "선호 장르를 %s%s 변경했습니다."
+                .formatted(String.join(", ", updatedGenres), KoreanJosa.pick(updatedGenres.get(updatedGenres.size() - 1), "으로", "로"));
         return persistTurn(user, conversation, userMessage, reply, List.of());
     }
 
     private ChatResponseDto handleGenrePreferenceViewRequest(User user, ChatConversation conversation, String userMessage) {
         PreferredGenresDto preferences = userService.getPreferredGenres(user.getId());
-        String reply = preferences.genres().isEmpty()
+        List<String> currentGenres = preferences.genres();
+        String reply = currentGenres.isEmpty()
                 ? "아직 선호 장르를 설정하지 않으셨어요."
-                : "현재 선호 장르는 %s(이)에요.".formatted(String.join(", ", preferences.genres()));
+                : "현재 선호 장르는 %s%s."
+                        .formatted(String.join(", ", currentGenres), KoreanJosa.pick(currentGenres.get(currentGenres.size() - 1), "이에요", "예요"));
         return persistTurn(user, conversation, userMessage, reply, List.of());
     }
 
@@ -2519,8 +2547,8 @@ public class ChatService {
 
         try {
             BookingDto updated = bookingService.changeSeat(user.getId(), target.id(), new SeatChangeRequest(fromSeatId, toSeatId));
-            String reply = "'%s' 좌석을 %s에서 %s(으)로 변경했어요. 변경된 좌석: %s"
-                    .formatted(updated.movieTitle(), fromLabel, toLabel, String.join(", ", updated.seats()));
+            String reply = "'%s' 좌석을 %s에서 %s%s 변경했어요. 변경된 좌석: %s"
+                    .formatted(updated.movieTitle(), fromLabel, toLabel, KoreanJosa.pick(toLabel, "으로", "로"), String.join(", ", updated.seats()));
             return persistTurn(user, conversation, userMessage, reply, List.of());
         } catch (ApiException e) {
             return persistTurn(user, conversation, userMessage, e.getMessage(), List.of());

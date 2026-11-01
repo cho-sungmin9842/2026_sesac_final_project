@@ -82,7 +82,7 @@ public class MovieService {
     // 걸러낼 수 없어서(날짜 범위 자체를 만들 수 없음), 연도 필터와 똑같이 movie.year() == null로 직접 거릅니다.
     private static final String YEAR_UNKNOWN_FILTER = "unknown";
 
-    public MovieSearchResultDto search(String query, List<String> genres, String year, String runtime, String sort, int page, int pageSize, String field) {
+    public MovieSearchResultDto search(String query, List<String> genres, String year, String runtime, String ageRating, String sort, int page, int pageSize, String field) {
         boolean isUnknownYear = YEAR_UNKNOWN_FILTER.equals(year);
         String releaseDts = year == null || year.isBlank() || isUnknownYear ? null : year + "0101";
         String releaseDte = year == null || year.isBlank() || isUnknownYear ? null : year + "1231";
@@ -100,7 +100,7 @@ public class MovieService {
         // 정렬과 동일해야 합니다(2026-10-18 요청 - 예전엔 리뷰 있는 몇 편만 남기고 나머지 수만 건이
         // 통째로 사라져서, 사실상 "평점 있는 영화만 보여주는 필터"처럼 동작했습니다).
         if (!hasQuery && "rating".equals(sort)) {
-            return searchByRating(cleanGenres, year, runtime, page, pageSize);
+            return searchByRating(cleanGenres, year, runtime, ageRating, page, pageSize);
         }
 
         if (cleanGenres.size() <= 1 && !hasQuery) {
@@ -119,18 +119,18 @@ public class MovieService {
             // 넓게 받아와 직접 거르기" 방식은 2024년처럼 최신순 상위에 몰린 연도가 많으면 탐색 범위 안에
             // 그 연도 항목이 하나도 안 걸려 빈 목록이 나올 수 있었습니다).
             if (hasYearFilter && movieCountCacheService.hasFreshYearIndex(genre, year)) {
-                pageMovies = fetchYearIndexedPage(genre, year, runtime, sort, page, pageSize);
+                pageMovies = fetchYearIndexedPage(genre, year, runtime, ageRating, sort, page, pageSize);
                 fallbackEstimate = pageMovies.size();
             } else {
-                FilledPage filled = fetchFilledPage(field, query, genre, releaseDts, releaseDte, runtime, year, pageSize, startCount, kmdbSort);
+                FilledPage filled = fetchFilledPage(field, query, genre, releaseDts, releaseDte, runtime, ageRating, year, pageSize, startCount, kmdbSort);
                 pageMovies = filled.movies();
                 fallbackEstimate = filled.totalCount();
             }
-            // 화면에 보이는 건수(nation이 정확히 "대한민국"이고 러닝타임 필터까지 통과한 영화만 센 값)가
-            // 어긋나지 않도록, 이번 페이지 안에서만 계산한 추정치(fallbackEstimate) 대신 전체 카탈로그를
-            // 훑어 캐시해둔 정확한 건수를 씁니다. 아직 캐시가 없으면(첫 조회) 그 추정치를 그대로 보여주고,
-            // 정확한 값은 백그라운드에서 계산되는 대로 다음 요청부터 반영됩니다.
-            int totalCount = movieCountCacheService.getDomesticTotalCount(genre, year, runtime, fallbackEstimate);
+            // 화면에 보이는 건수(nation이 정확히 "대한민국"이고 러닝타임/연령등급 필터까지 통과한 영화만
+            // 센 값)가 어긋나지 않도록, 이번 페이지 안에서만 계산한 추정치(fallbackEstimate) 대신 전체
+            // 카탈로그를 훑어 캐시해둔 정확한 건수를 씁니다. 아직 캐시가 없으면(첫 조회) 그 추정치를 그대로
+            // 보여주고, 정확한 값은 백그라운드에서 계산되는 대로 다음 요청부터 반영됩니다.
+            int totalCount = movieCountCacheService.getDomesticTotalCount(genre, year, runtime, ageRating, fallbackEstimate);
             int totalPages = totalCount == 0 ? 0 : (int) Math.ceil(totalCount / (double) pageSize);
             return new MovieSearchResultDto(pageMovies, page, pageSize, totalCount, totalPages);
         }
@@ -180,11 +180,12 @@ public class MovieService {
             allMovies = toRatedSummaries(matchedItems);
         }
 
-        // 러닝타임/개봉연도는 KMDB 검색 파라미터로 정확히 거를 수 없어 응답을 받은 뒤 직접 거릅니다
-        // (500건 한도 안에서만 정확).
+        // 러닝타임/개봉연도/연령등급은 KMDB 검색 파라미터로 정확히 거를 수 없어 응답을 받은 뒤 직접
+        // 거릅니다(500건 한도 안에서만 정확).
         allMovies = allMovies.stream()
                 .filter(movie -> KmdbTextUtils.matchesRuntimeFilter(movie.runtimeMinutes(), runtime))
                 .filter(movie -> matchesYearFilter(movie.year(), year))
+                .filter(movie -> KmdbTextUtils.matchesAgeRatingFilter(movie.ageRating(), ageRating))
                 .toList();
         allMovies = sortMovies(allMovies, sort, field, query);
 
@@ -431,7 +432,7 @@ public class MovieService {
         String releaseDts = date.minusWeeks(4).format(KMDB_DATE_FORMAT);
         // 상영관 용량을 넘지 않게 하루 최대 NOW_SHOWING_LIST_COUNT(16)편만 받아옵니다. 최근 4주 내 개봉작이 그보다
         // 많은 날은 KMDB가 돌려주는 앞쪽 16편만 "상영중"으로 칩니다(정렬 파라미터를 안 보내므로 어떤 16편인지는 KMDB 순서).
-        FilledPage filled = fetchFilledPage("title", "", null, releaseDts, releaseDte, null, null, NOW_SHOWING_LIST_COUNT, 0, null);
+        FilledPage filled = fetchFilledPage("title", "", null, releaseDts, releaseDte, null, null, null, NOW_SHOWING_LIST_COUNT, 0, null);
         List<MovieSummaryDto> sorted = sortMovies(filled.movies(), "name");
 
         List<NowShowingSnapshot> toSave = new ArrayList<>();
@@ -461,7 +462,7 @@ public class MovieService {
     // 대신 MovieCountCacheService가 전체 카탈로그를 훑어 캐시해둔 정확한 값을 씁니다).
     private FilledPage fetchFilledPage(
             String field, String query, String genre, String releaseDts, String releaseDte, String runtime,
-            String year, int pageSize, int startCount, String sort
+            String ageRating, String year, int pageSize, int startCount, String sort
     ) {
         List<MovieSummaryDto> collected = new ArrayList<>();
         int currentStart = startCount;
@@ -469,6 +470,7 @@ public class MovieService {
         int skipped = 0;
         boolean hasRuntimeFilter = runtime != null && !runtime.isBlank();
         boolean hasYearFilter = year != null && !year.isBlank();
+        boolean hasAgeRatingFilter = ageRating != null && !ageRating.isBlank();
         // 개봉연도 필터는 화면에 보이는 연도(개봉일자 우선, 없으면 제작연도 - MovieMapper.toYear 참고)와
         // 똑같은 기준으로 걸러야 합니다. KMDB의 releaseDts/Dte는 개봉일자만 보고 제작연도로의 대체가 없어서,
         // 이 파라미터를 그대로 걸면 제작연도로만 표시되는(개봉일자가 없는) 영화가 전부 빠집니다(실측:
@@ -478,7 +480,7 @@ public class MovieService {
         String effectiveReleaseDte = hasYearFilter ? null : releaseDte;
 
         for (int attempt = 0; attempt < FILL_PAGE_MAX_ATTEMPTS && collected.size() < pageSize; attempt++) {
-            int need = (hasRuntimeFilter || hasYearFilter)
+            int need = (hasRuntimeFilter || hasYearFilter || hasAgeRatingFilter)
                     ? RUNTIME_FILTERED_FETCH_SIZE
                     : pageSize - collected.size();
             KmdbSearchResponse response = searchByField(field, query, genre, effectiveReleaseDts, effectiveReleaseDte, need, currentStart, sort);
@@ -493,6 +495,7 @@ public class MovieService {
             List<MovieSummaryDto> filtered = toRatedSummaries(rawItems).stream()
                     .filter(movie -> KmdbTextUtils.matchesRuntimeFilter(movie.runtimeMinutes(), runtime))
                     .filter(movie -> matchesYearFilter(movie.year(), year))
+                    .filter(movie -> KmdbTextUtils.matchesAgeRatingFilter(movie.ageRating(), ageRating))
                     .toList();
             skipped += rawItems.size() - filtered.size();
             collected.addAll(filtered);
@@ -523,7 +526,9 @@ public class MovieService {
     // 조합의 movie_id 순서를 그대로 가져와 movies 캐시에서 요약 정보를 꺼내 붙입니다 - KMDB를 다시
     // 호출하지 않으므로 연도 하나당 수천 건이 있어도 전부 DB 조회만으로 끝납니다. 러닝타임 필터와
     // 정렬(이름순/최신순)은 색인 순서만으로는 못 맞추니 이 자리에서 직접 거르고 다시 정렬합니다.
-    private List<MovieSummaryDto> fetchYearIndexedPage(String genre, String year, String runtime, String sort, int page, int pageSize) {
+    private List<MovieSummaryDto> fetchYearIndexedPage(
+            String genre, String year, String runtime, String ageRating, String sort, int page, int pageSize
+    ) {
         String genreKey = genre == null || genre.isBlank() ? "ALL" : genre;
         List<String> movieIds = movieYearIndexRepository.findByGenreKeyAndYearKeyOrderByDisplayOrderAsc(genreKey, year).stream()
                 .map(MovieYearIndex::getMovieId)
@@ -538,6 +543,7 @@ public class MovieService {
 
         List<MovieSummaryDto> movies = movieCacheService.findCachedSummariesInOrder(movieIds, ratingsForCache).stream()
                 .filter(movie -> KmdbTextUtils.matchesRuntimeFilter(movie.runtimeMinutes(), runtime))
+                .filter(movie -> KmdbTextUtils.matchesAgeRatingFilter(movie.ageRating(), ageRating))
                 .toList();
         movies = sortMovies(movies, sort);
 
@@ -596,8 +602,10 @@ public class MovieService {
     // 전부 가져와도 됩니다), 리뷰가 없는 나머지는 최신순 카탈로그에서 이어 붙입니다. "정렬"일 뿐 "필터"가
     // 아니므로, 전체 건수는 다른 정렬(최신순/이름순)과 같아야 합니다(2026-10-18 요청 - 예전엔 리뷰 있는
     // 몇 편만 남기고 나머지가 통째로 사라졌습니다).
-    private MovieSearchResultDto searchByRating(List<String> genres, String year, String runtime, int page, int pageSize) {
-        List<MovieSummaryDto> rated = ratedMoviesMatching(genres, year, runtime);
+    private MovieSearchResultDto searchByRating(
+            List<String> genres, String year, String runtime, String ageRating, int page, int pageSize
+    ) {
+        List<MovieSummaryDto> rated = ratedMoviesMatching(genres, year, runtime, ageRating);
         Set<String> ratedIds = rated.stream().map(MovieSummaryDto::id).collect(Collectors.toSet());
 
         int fromIndex = (page - 1) * pageSize;
@@ -618,15 +626,16 @@ public class MovieService {
             // 전체 건수 안에 포함된 숫자라서, 평점순이라고 전체 건수 자체가 달라지지 않습니다.
             String genre = genres.isEmpty() ? null : genres.get(0);
             if (remaining > 0) {
-                pageMovies.addAll(fetchLatestFillerSingleGenre(genre, year, runtime, unratedSkip, remaining, ratedIds));
+                pageMovies.addAll(fetchLatestFillerSingleGenre(genre, year, runtime, ageRating, unratedSkip, remaining, ratedIds));
             }
-            totalCount = movieCountCacheService.getDomesticTotalCount(genre, year, runtime, rated.size());
+            totalCount = movieCountCacheService.getDomesticTotalCount(genre, year, runtime, ageRating, rated.size());
         } else {
             // 장르 2개 이상은 이미 색인으로 정확한 전체 목록을 바로 모을 수 있으므로, 거기서 리뷰 있는
             // 영화를 뺀 나머지를 그대로 이어 붙이고 실제 개수로 전체 건수를 셉니다.
             List<MovieSummaryDto> unratedForGenres = fetchIndexedMultiGenrePage(genres).stream()
                     .filter(movie -> KmdbTextUtils.matchesRuntimeFilter(movie.runtimeMinutes(), runtime))
                     .filter(movie -> matchesYearFilter(movie.year(), year))
+                    .filter(movie -> KmdbTextUtils.matchesAgeRatingFilter(movie.ageRating(), ageRating))
                     .filter(movie -> !ratedIds.contains(movie.id()))
                     .toList();
             if (remaining > 0) {
@@ -643,7 +652,7 @@ public class MovieService {
 
     // 리뷰가 있는 영화를 평점 내림차순으로 전수 조사합니다(실제로 몇 안 되므로 KMDB 상세까지 전부
     // 조회해도 됩니다) - searchByRating이 "평점순" 맨 앞에 배치할 때 씁니다.
-    private List<MovieSummaryDto> ratedMoviesMatching(List<String> genres, String year, String runtime) {
+    private List<MovieSummaryDto> ratedMoviesMatching(List<String> genres, String year, String runtime, String ageRating) {
         List<TopRatedMovie> topRated = reviewService.getTopRatedMovies(0);
         List<MovieSummaryDto> matched = new ArrayList<>();
         for (TopRatedMovie rated : topRated) {
@@ -667,6 +676,9 @@ public class MovieService {
                 if (!matchesYearFilter(summary.year(), year)) {
                     continue;
                 }
+                if (!KmdbTextUtils.matchesAgeRatingFilter(summary.ageRating(), ageRating)) {
+                    continue;
+                }
                 matched.add(summary);
             } catch (Exception ignored) {
                 // KMDB에서 더 이상 찾을 수 없게 된 movieId는 건너뜁니다.
@@ -679,13 +691,13 @@ public class MovieService {
     // 최신순 안에서도 자기 자리를 그대로 가지고 있으므로, 중복으로 다시 나오지 않도록 걸러내면서 필요한
     // 개수(count)만큼 채울 때까지 몇 번 더 받아옵니다(제외되는 건수가 보통 몇 건 안 되므로 금방 채워집니다).
     private List<MovieSummaryDto> fetchLatestFillerSingleGenre(
-            String genre, String year, String runtime, int skip, int count, Set<String> excludeIds
+            String genre, String year, String runtime, String ageRating, int skip, int count, Set<String> excludeIds
     ) {
         List<MovieSummaryDto> result = new ArrayList<>();
         int fetchStart = skip;
         for (int attempt = 0; attempt < 5 && result.size() < count; attempt++) {
             int need = count - result.size() + excludeIds.size();
-            FilledPage filled = fetchFilledPage(null, "", genre, null, null, runtime, year, need, fetchStart, "prodYear,1");
+            FilledPage filled = fetchFilledPage(null, "", genre, null, null, runtime, ageRating, year, need, fetchStart, "prodYear,1");
             if (filled.movies().isEmpty()) {
                 break;
             }

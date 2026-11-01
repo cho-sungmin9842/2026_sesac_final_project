@@ -29,20 +29,32 @@ const RUNTIME_PARAM_MAP = {
 // 같은 방식으로 "unknown" 코드로 바꿔 보냅니다.
 const YEAR_UNKNOWN_LABEL = '정보 없음'
 
+// 연령등급도 KMDB 검색 파라미터에 없어 백엔드가 직접 걸러주는 우리 쪽 전용 값입니다. KMDB 원본 등급
+// 표기가 20종 넘게 제각각이라(옛날 영화는 "연소자불가" 같은 옛 등급제 용어도 씀) 백엔드가 5개 버킷으로
+// 정규화한 코드이고, 화면 라벨을 그 코드로 바꿔 보냅니다("전체"는 보내지 않음 = 필터 없음).
+const AGE_RATING_PARAM_MAP = {
+  전체관람가: 'general',
+  '12세 이상': 'age12',
+  '15세 이상': 'age15',
+  청소년관람불가: 'age19',
+  '정보 없음': 'unknown',
+}
+
 /**
  * query가 빈 문자열이면 KMDB 전체 카탈로그를 대상으로 검색합니다(제목 필터 없음).
  * genre/year는 KMDB가 실제로 지원하는 필터라 서버(KMDB)에서 걸러진 결과가 옵니다.
  * genre는 문자열 하나 또는 배열(여러 장르 동시 필터, 예: 선호 장르가 여러 개인 경우) 둘 다 받습니다.
- * runtime은 KMDB에 없는 필터라 백엔드가 응답을 받은 뒤 직접 거르고, totalCount에도 반영해 돌려줍니다.
+ * runtime/ageRating은 KMDB에 없는 필터라 백엔드가 응답을 받은 뒤 직접 거르고, totalCount에도 반영해 돌려줍니다.
  * sort(latest/name)는 KMDB에 정렬 파라미터가 없어서 백엔드가 여러 페이지 분량을 미리 받아와 직접 정렬합니다.
  * 응답은 { movies, page, pageSize, totalCount, totalPages } 형태입니다.
  */
-export function searchMovies(query, { genre, year, runtime, sort, page = 1, pageSize = 20, field } = {}) {
+export function searchMovies(query, { genre, year, runtime, ageRating, sort, page = 1, pageSize = 20, field } = {}) {
   const params = new URLSearchParams({ query, page, pageSize })
   const genreList = Array.isArray(genre) ? genre.filter(Boolean) : [genre].filter(Boolean)
   genreList.forEach((value) => params.append('genre', toKmdbGenreParam(value)))
   if (year) params.set('year', year === YEAR_UNKNOWN_LABEL ? 'unknown' : year)
   if (runtime && RUNTIME_PARAM_MAP[runtime]) params.set('runtime', RUNTIME_PARAM_MAP[runtime])
+  if (ageRating && AGE_RATING_PARAM_MAP[ageRating]) params.set('ageRating', AGE_RATING_PARAM_MAP[ageRating])
   if (sort) params.set('sort', sort)
   if (field) params.set('field', field)
   return request(`/api/movies?${params.toString()}`)

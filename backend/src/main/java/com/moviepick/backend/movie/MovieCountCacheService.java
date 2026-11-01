@@ -95,29 +95,33 @@ public class MovieCountCacheService {
     }
 
     // genre/year는 "전체"일 때 null(또는 빈 값)로 들어옵니다. runtimeFilter는 null/빈 값("전체") 또는
-    // "under120"/"over120"/"unknown"입니다. fallbackEstimate는 아직 정확한 값을 계산해둔 적이 없을 때
-    // (캐시가 전혀 없을 때) 대신 보여줄 값으로, 호출 쪽(MovieService)이 이미 가지고 있는 "이번 페이지
-    // 안에서만 추정한" 값을 그대로 넘겨받습니다.
-    public int getDomesticTotalCount(String genre, String year, String runtimeFilter, int fallbackEstimate) {
+    // "under120"/"over120"/"unknown"입니다. ageRatingFilter는 null/빈 값("전체") 또는 KmdbTextUtils의
+    // general/age12/age15/age19/unknown 중 하나입니다. fallbackEstimate는 아직 정확한 값을 계산해둔 적이
+    // 없을 때(캐시가 전혀 없을 때) 대신 보여줄 값으로, 호출 쪽(MovieService)이 이미 가지고 있는 "이번
+    // 페이지 안에서만 추정한" 값을 그대로 넘겨받습니다.
+    public int getDomesticTotalCount(String genre, String year, String runtimeFilter, String ageRatingFilter, int fallbackEstimate) {
         String genreKey = normalizeKey(genre);
         String yearKey = normalizeKey(year);
         String runtimeKey = normalizeRuntimeKey(runtimeFilter);
+        String ageRatingKey = normalizeAgeRatingKey(ageRatingFilter);
 
-        Optional<MovieCountCache> cached = repository.findByGenreKeyAndYearKeyAndRuntimeKey(genreKey, yearKey, runtimeKey);
+        Optional<MovieCountCache> cached =
+                repository.findByGenreKeyAndYearKeyAndRuntimeKeyAndAgeRatingKey(genreKey, yearKey, runtimeKey, ageRatingKey);
         if (cached.isPresent()
                 && cached.get().getComputedAt().isAfter(LocalDateTime.now().minusHours(CACHE_TTL_HOURS))) {
             return cached.get().getTotalCount();
         }
 
-        // 이 (연도, 러닝타임) 조합 캐시가 없거나 오래됐어도, "장르 전체" 스캔 결과((genre, ALL, ALL) 행)
-        // 자체가 아직 최신이면 재스캔을 또 트리거하지 않습니다 - 1919년 이전처럼 영화가 한 편도 없는 연도는
-        // scanDomesticTotalCounts가 영원히 그 조합의 행을 안 만들어서(발견한 조합만 저장하므로) "이 조합만
-        // 캐시가 없다"가 늘 참이 되고, 예전엔 그때마다 매번 장르 전체 재스캔(몇 분~십수 분 소요, KMDB
-        // 수십~백여 회 호출)을 새로 띄워서, 그 재스캔의 "일단 색인을 통째로 지우고 다시 채우기" 단계
-        // 때문에 재스캔이 끝날 때까지 그 장르의 모든 연도 목록이 통째로 빈 화면이 되는 문제가 있었습니다
-        // (2026-10-13, 오래된 연도를 여러 번 조회해봤더니 재발). 장르 전체 스캔 자체가 오래됐을 때만
-        // 재스캔을 띄우고, 이 조합 하나만 없는 경우엔 트리거하지 않습니다.
-        Optional<MovieCountCache> genreScan = repository.findByGenreKeyAndYearKeyAndRuntimeKey(genreKey, ALL_KEY, ALL_KEY);
+        // 이 (연도, 러닝타임, 연령등급) 조합 캐시가 없거나 오래됐어도, "장르 전체" 스캔 결과((genre, ALL,
+        // ALL, ALL) 행) 자체가 아직 최신이면 재스캔을 또 트리거하지 않습니다 - 1919년 이전처럼 영화가 한
+        // 편도 없는 연도는 scanDomesticTotalCounts가 영원히 그 조합의 행을 안 만들어서(발견한 조합만
+        // 저장하므로) "이 조합만 캐시가 없다"가 늘 참이 되고, 예전엔 그때마다 매번 장르 전체 재스캔(몇
+        // 분~십수 분 소요, KMDB 수십~백여 회 호출)을 새로 띄워서, 그 재스캔의 "일단 색인을 통째로 지우고
+        // 다시 채우기" 단계 때문에 재스캔이 끝날 때까지 그 장르의 모든 연도 목록이 통째로 빈 화면이 되는
+        // 문제가 있었습니다(2026-10-13, 오래된 연도를 여러 번 조회해봤더니 재발). 장르 전체 스캔 자체가
+        // 오래됐을 때만 재스캔을 띄우고, 이 조합 하나만 없는 경우엔 트리거하지 않습니다.
+        Optional<MovieCountCache> genreScan =
+                repository.findByGenreKeyAndYearKeyAndRuntimeKeyAndAgeRatingKey(genreKey, ALL_KEY, ALL_KEY, ALL_KEY);
         boolean genreScanFresh = genreScan.isPresent()
                 && genreScan.get().getComputedAt().isAfter(LocalDateTime.now().minusHours(CACHE_TTL_HOURS));
         if (!genreScanFresh) {
@@ -129,11 +133,11 @@ public class MovieCountCacheService {
         }
 
         // 이 조합의 캐시 행이 아예 없을 때, 장르 자체는 이미 최소 한 번 전체 스캔이 끝나 있다면(= (genre,
-        // ALL, ALL) 행이 존재) "아직 못 구한 값"이 아니라 "스캔 중 이 조합에 해당하는 영화를 하나도 못
-        // 찾았다"는 뜻입니다(scanDomesticTotalCounts는 발견한 모든 조합을 빠짐없이 저장하므로, 빠졌다는 건
-        // 0건이 확정입니다). 그 경우에도 fallbackEstimate(이번 페이지의 KMDB 원본 TotalCount - 연도/국내
-        // 필터를 반영하기 전 값이라 수만 건으로 잡힘)를 그대로 보여주면 "건수는 5만 건인데 목록은 0건"처럼
-        // 보여서 혼란스러웠습니다. 장르를 아예 스캔한 적이 없을 때만 fallbackEstimate를 보여줍니다.
+        // ALL, ALL, ALL) 행이 존재) "아직 못 구한 값"이 아니라 "스캔 중 이 조합에 해당하는 영화를 하나도
+        // 못 찾았다"는 뜻입니다(scanDomesticTotalCounts는 발견한 모든 조합을 빠짐없이 저장하므로, 빠졌다는
+        // 건 0건이 확정입니다). 그 경우에도 fallbackEstimate(이번 페이지의 KMDB 원본 TotalCount - 연도/
+        // 국내 필터를 반영하기 전 값이라 수만 건으로 잡힘)를 그대로 보여주면 "건수는 5만 건인데 목록은
+        // 0건"처럼 보여서 혼란스러웠습니다. 장르를 아예 스캔한 적이 없을 때만 fallbackEstimate를 보여줍니다.
         return genreScan.isPresent() ? 0 : fallbackEstimate;
     }
 
@@ -155,7 +159,7 @@ public class MovieCountCacheService {
             return false;
         }
         String genreKey = normalizeKey(genre);
-        return repository.findByGenreKeyAndYearKeyAndRuntimeKey(genreKey, year, ALL_KEY).isPresent();
+        return repository.findByGenreKeyAndYearKeyAndRuntimeKeyAndAgeRatingKey(genreKey, year, ALL_KEY, ALL_KEY).isPresent();
     }
 
     // (genre, ALL, ALL) 행이 있으면 이 장르는 전체 카탈로그 스캔이 최소 한 번 끝난 상태라, movie_year_index
@@ -165,14 +169,15 @@ public class MovieCountCacheService {
     // ensureGenreScanTriggered가 별도로 트리거하는 백그라운드 재스캔이 끝나는 대로 반영됩니다).
     public boolean hasCompletedGenreScan(String genre) {
         String genreKey = normalizeKey(genre);
-        return repository.findByGenreKeyAndYearKeyAndRuntimeKey(genreKey, ALL_KEY, ALL_KEY).isPresent();
+        return repository.findByGenreKeyAndYearKeyAndRuntimeKeyAndAgeRatingKey(genreKey, ALL_KEY, ALL_KEY, ALL_KEY).isPresent();
     }
 
     // 다중 장르 조회에서 hasCompletedGenreScan이 false인 장르를 발견했을 때 호출합니다 - 이번 요청은
     // 기존 KMDB 폴백으로 응답하되, 이 장르의 스캔을 미리 걸어둬서 다음 조회부터는 빨라지게 합니다.
     public void ensureGenreScanTriggered(String genre) {
         String genreKey = normalizeKey(genre);
-        Optional<MovieCountCache> genreScan = repository.findByGenreKeyAndYearKeyAndRuntimeKey(genreKey, ALL_KEY, ALL_KEY);
+        Optional<MovieCountCache> genreScan =
+                repository.findByGenreKeyAndYearKeyAndRuntimeKeyAndAgeRatingKey(genreKey, ALL_KEY, ALL_KEY, ALL_KEY);
         boolean genreScanFresh = genreScan.isPresent()
                 && genreScan.get().getComputedAt().isAfter(LocalDateTime.now().minusHours(CACHE_TTL_HOURS));
         if (!genreScanFresh) {
@@ -194,6 +199,10 @@ public class MovieCountCacheService {
         return RUNTIME_UNKNOWN_KEY.equals(runtimeFilter) ? RUNTIME_UNKNOWN_KEY : RUNTIME_OVER_KEY;
     }
 
+    private String normalizeAgeRatingKey(String ageRatingFilter) {
+        return ageRatingFilter == null || ageRatingFilter.isBlank() ? ALL_KEY : ageRatingFilter;
+    }
+
     // 연도는 더 이상 스캔 범위를 제한하지 않으므로(날짜 제한 없이 장르 전체를 훑어 모든 연도를 한 번에
     // 집계), scanKey는 장르만으로 충분합니다.
     private void triggerBackgroundScan(String genre, String genreKey) {
@@ -204,16 +213,19 @@ public class MovieCountCacheService {
             try {
                 ScanResult result = scanDomesticTotalCounts(genre);
                 LocalDateTime now = LocalDateTime.now();
-                result.countsByYear().forEach((yearKey, runtimeCounts) ->
-                        runtimeCounts.forEach((runtimeKey, total) -> {
-                            MovieCountCache row = repository.findByGenreKeyAndYearKeyAndRuntimeKey(genreKey, yearKey, runtimeKey)
-                                    .map(existing -> {
-                                        existing.update(total, now);
-                                        return existing;
-                                    })
-                                    .orElseGet(() -> new MovieCountCache(genreKey, yearKey, runtimeKey, total, now));
-                            repository.save(row);
-                        })
+                result.countsByYear().forEach((yearKey, runtimeMap) ->
+                        runtimeMap.forEach((runtimeKey, ageRatingCounts) ->
+                                ageRatingCounts.forEach((ageRatingKey, total) -> {
+                                    MovieCountCache row = repository
+                                            .findByGenreKeyAndYearKeyAndRuntimeKeyAndAgeRatingKey(genreKey, yearKey, runtimeKey, ageRatingKey)
+                                            .map(existing -> {
+                                                existing.update(total, now);
+                                                return existing;
+                                            })
+                                            .orElseGet(() -> new MovieCountCache(genreKey, yearKey, runtimeKey, ageRatingKey, total, now));
+                                    repository.save(row);
+                                })
+                        )
                 );
 
                 // 연도 필터용 색인은 이번 스캔 결과로 통째로 갈아끼웁니다(사이에 빠진 영화가 생기지 않도록
@@ -231,19 +243,23 @@ public class MovieCountCacheService {
         });
     }
 
-    private record ScanResult(Map<String, Map<String, Integer>> countsByYear, List<MovieYearIndex> indexRows) {
+    // countsByYear: yearKey -> runtimeKey -> ageRatingKey -> count. runtimeKey/ageRatingKey는 각각
+    // "ALL"(그 축 무관 합계)이거나 구체적인 구간/등급이라, 하나의 영화는 (ALL,ALL)/(runtime,ALL)/
+    // (ALL,ageRating)/(runtime,ageRating) 네 조합 모두에 더해집니다(tally 참고) - 어떤 필터 조합으로
+    // 조회하든 정확한 값을 캐시에서 바로 찾을 수 있게 하기 위함입니다.
+    private record ScanResult(Map<String, Map<String, Map<String, Integer>>> countsByYear, List<MovieYearIndex> indexRows) {
     }
 
     // 이 장르의 카탈로그를 날짜 제한 없이 한 번 훑으면서, 영화마다 화면에 보이는 것과 똑같은 기준
-    // (MovieMapper.toYear - 개봉일자 우선, 없으면 제작연도)으로 연도를 구해 (연도 x 러닝타임) 건수를
-    // 전부 동시에 집계합니다. "ALL" 연도 키는 이 장르의 연도 무관 합계이고, 그 외 키는 "2024"처럼 실제
-    // 연도 문자열이거나(연도를 아예 알 수 없는 극소수 영화는) "unknown"입니다(러닝타임의 "정보 없음"과
+    // (MovieMapper.toYear - 개봉일자 우선, 없으면 제작연도)으로 연도를 구해 (연도 x 러닝타임 x 연령등급)
+    // 건수를 전부 동시에 집계합니다. "ALL" 연도 키는 이 장르의 연도 무관 합계이고, 그 외 키는 "2024"처럼
+    // 실제 연도 문자열이거나(연도를 아예 알 수 없는 극소수 영화는) "unknown"입니다(러닝타임의 "정보 없음"과
     // 같은 개념 - 화면의 개봉연도 필터 맨 끝 "정보 없음" 항목).
     // 같은 자리에서 movie_year_index에 넣을 (연도, movie_id) 순서도 함께 모으고, movies 캐시에도
     // 요약 정보를 페이지 단위로 누적해서, 연도 필터로 실제 목록을 요청할 때 KMDB를 다시 부르지 않고
     // 이 둘만으로 바로 서빙할 수 있게 합니다.
     private ScanResult scanDomesticTotalCounts(String genre) {
-        Map<String, Map<String, Integer>> countsByYear = new HashMap<>();
+        Map<String, Map<String, Map<String, Integer>>> countsByYear = new HashMap<>();
         List<MovieYearIndex> indexRows = new ArrayList<>();
         String genreKey = normalizeKey(genre);
         int startCount = 0;
@@ -267,12 +283,14 @@ public class MovieCountCacheService {
                     continue;
                 }
                 String runtimeKey = runtimeKeyFor(item);
-                tally(countsByYear, ALL_KEY, runtimeKey);
-                pageSummaries.add(movieMapper.toSummary(item));
+                MovieSummaryDto summary = movieMapper.toSummary(item);
+                String ageRatingKey = KmdbTextUtils.normalizeAgeRatingCategory(summary.ageRating());
+                tally(countsByYear, ALL_KEY, runtimeKey, ageRatingKey);
+                pageSummaries.add(summary);
 
                 Integer year = movieMapper.toYear(item);
                 String yearKey = year != null ? String.valueOf(year) : YEAR_UNKNOWN_KEY;
-                tally(countsByYear, yearKey, runtimeKey);
+                tally(countsByYear, yearKey, runtimeKey, ageRatingKey);
                 indexRows.add(new MovieYearIndex(genreKey, yearKey, movieMapper.toId(item), displayOrder++));
             }
             // 평점 조회 없이(스캔 전용) 요약 필드만 movies 캐시에 쌓아, 색인에서 꺼내 쓸 때 KMDB를
@@ -291,10 +309,21 @@ public class MovieCountCacheService {
         return runtimeMinutes < KmdbTextUtils.RUNTIME_FILTER_THRESHOLD_MINUTES ? RUNTIME_UNDER_KEY : RUNTIME_OVER_KEY;
     }
 
-    // yearKey(ALL 또는 특정 연도)에 해당 영화 1건을 "그 연도 전체"와 "그 연도 + 이 러닝타임 구간" 양쪽에 더합니다.
-    private void tally(Map<String, Map<String, Integer>> countsByYear, String yearKey, String runtimeKey) {
-        Map<String, Integer> runtimeCounts = countsByYear.computeIfAbsent(yearKey, k -> new HashMap<>());
-        runtimeCounts.merge(ALL_KEY, 1, Integer::sum);
-        runtimeCounts.merge(runtimeKey, 1, Integer::sum);
+    // yearKey(ALL 또는 특정 연도)에 해당 영화 1건을, (러닝타임, 연령등급) 두 축 모두에서 "그 축은 무관"한
+    // 경우("ALL")와 "이 구체적인 구간/등급"인 경우를 조합한 네 칸(ALL·ALL / runtime·ALL / ALL·ageRating /
+    // runtime·ageRating)에 전부 더합니다 - 조회 시 두 필터를 각각 걸거나, 둘 다 걸거나, 둘 다 안 거는
+    // 어떤 조합이 와도 정확한 값을 바로 찾을 수 있게 하기 위함입니다.
+    private void tally(
+            Map<String, Map<String, Map<String, Integer>>> countsByYear, String yearKey, String runtimeKey, String ageRatingKey
+    ) {
+        Map<String, Map<String, Integer>> runtimeMap = countsByYear.computeIfAbsent(yearKey, k -> new HashMap<>());
+        incrementAgeRatingCounts(runtimeMap, ALL_KEY, ageRatingKey);
+        incrementAgeRatingCounts(runtimeMap, runtimeKey, ageRatingKey);
+    }
+
+    private void incrementAgeRatingCounts(Map<String, Map<String, Integer>> runtimeMap, String runtimeKey, String ageRatingKey) {
+        Map<String, Integer> ageRatingCounts = runtimeMap.computeIfAbsent(runtimeKey, k -> new HashMap<>());
+        ageRatingCounts.merge(ALL_KEY, 1, Integer::sum);
+        ageRatingCounts.merge(ageRatingKey, 1, Integer::sum);
     }
 }

@@ -1,3 +1,5 @@
+import HorizontalScroll from '../../../components/common/HorizontalScroll'
+
 function formatDateTime(dateTimeStr) {
   const date = new Date(dateTimeStr)
   return date.toLocaleString('ko-KR', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
@@ -7,7 +9,7 @@ function formatDateTime(dateTimeStr) {
 // 컬럼이 많아 좁은 화면(모바일)에서는 표가 찌그러지므로, 가로 스크롤로 보게끔 감쌉니다.
 function ReportTable({ reviews, onDelete }) {
   return (
-    <div className="overflow-x-auto">
+    <HorizontalScroll>
       <table className="w-full min-w-[640px] text-left text-sm">
         <thead>
           <tr className="border-b border-white/5 text-gray-400">
@@ -42,7 +44,7 @@ function ReportTable({ reviews, onDelete }) {
           ))}
         </tbody>
       </table>
-    </div>
+    </HorizontalScroll>
   )
 }
 

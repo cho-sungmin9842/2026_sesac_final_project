@@ -22,10 +22,15 @@ function WriteReviewDialog({ movieTitle, initialReview, onSubmit, onClose }) {
   const isEditing = Boolean(initialReview)
   const [score, setScore] = useState(initialReview?.score ?? 5)
   const [content, setContent] = useState(initialReview?.content ?? '')
+  const [error, setError] = useState('')
 
   const handleSubmit = (event) => {
     event.preventDefault()
-    if (!content.trim()) return
+    if (!content.trim()) {
+      setError('리뷰 내용을 입력해주세요.')
+      return
+    }
+    setError('')
     onSubmit({ score, content: content.trim() })
   }
 
@@ -47,13 +52,16 @@ function WriteReviewDialog({ movieTitle, initialReview, onSubmit, onClose }) {
             </label>
             <textarea
               id="review-content"
-              required
               rows={4}
               value={content}
-              onChange={(event) => setContent(event.target.value)}
+              onChange={(event) => {
+                setContent(event.target.value)
+                if (error) setError('')
+              }}
               placeholder="영화에 대한 감상을 남겨주세요"
               className="w-full rounded-lg bg-slate-800 px-3 py-2 text-sm text-gray-100 placeholder:text-gray-500 focus:outline-none"
             />
+            {error && <p className="mt-1 text-xs text-rose-400">{error}</p>}
           </div>
 
           <div className="flex justify-end gap-2">

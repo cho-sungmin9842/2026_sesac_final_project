@@ -32,22 +32,20 @@ function ReviewList({ reviews, currentUser, onEdit, onDelete }) {
               <p className="flex items-center gap-2 text-sm font-semibold text-gray-100">
                 📄 {review.authorNickname}
               </p>
-              <div className="flex items-center gap-3">
-                <Stars score={review.score} />
-                {isOwner && (
-                  <div className="flex gap-2 text-xs text-gray-400">
-                    <button type="button" onClick={() => onEdit(review)} className="hover:text-white">
-                      수정
-                    </button>
-                    <button type="button" onClick={() => onDelete(review)} className="hover:text-red-400">
-                      삭제
-                    </button>
-                  </div>
-                )}
-              </div>
+              <Stars score={review.score} />
             </div>
             {date && <p className="mt-1 text-right text-xs text-gray-500">작성일: {date}</p>}
             <p className="mt-2 text-sm text-gray-400">{review.content}</p>
+            {isOwner && (
+              <div className="mt-2 flex justify-end gap-2 text-xs text-gray-400">
+                <button type="button" onClick={() => onEdit(review)} className="hover:text-white">
+                  수정
+                </button>
+                <button type="button" onClick={() => onDelete(review)} className="hover:text-red-400">
+                  삭제
+                </button>
+              </div>
+            )}
           </div>
         )
       })}

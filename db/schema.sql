@@ -83,6 +83,18 @@ CREATE TABLE IF NOT EXISTS watched_movies (
     CONSTRAINT uq_watched_movies_user_movie UNIQUE (user_id, movie_id)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
 
+-- 홈 화면 "최근 본 영화" 섹션 - 영화 상세 페이지를 열 때마다 기록되고, 같은 영화를 또 보면 시간만 갱신됩니다.
+CREATE TABLE IF NOT EXISTS recently_viewed_movies (
+    id          BIGINT AUTO_INCREMENT PRIMARY KEY,
+    user_id     BIGINT      NOT NULL,
+    movie_id    VARCHAR(64) NOT NULL,
+    movie_title VARCHAR(255) NOT NULL,
+    poster_url  VARCHAR(500) NULL,
+    viewed_at   DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_recently_viewed_movies_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
+    CONSTRAINT uq_recently_viewed_movies_user_movie UNIQUE (user_id, movie_id)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
+
 -- AI 추천 채팅의 "대화방" 단위. 사용자가 "새 대화 시작"을 누르면 메시지를 처음 보낼 때 하나 생기고,
 -- title은 그 첫 메시지를 간단히 줄인 값입니다(ChatGPT 사이드바처럼 왼쪽에서 과거 대화를 구분하는 용도).
 -- last_message_at은 사이드바 목록 정렬(최근 대화가 위로)에 씁니다.
@@ -162,16 +174,17 @@ CREATE TABLE IF NOT EXISTS now_showing_snapshots (
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
 
 -- "전체 영화" 목록 화면 상단의 건수 캐시. nation이 정확히 "대한민국" 하나뿐인 영화만 센 정확한 개수를
--- (장르, 개봉연도, 러닝타임) 조합별로 저장합니다. "전체"는 genre_key/year_key/runtime_key에 "ALL"로
--- 저장됩니다(러닝타임은 그 외 "under120"/"over120"). KMDB 카탈로그 전체(5만 건 이상)를 매 요청마다
--- 끝까지 훑을 수 없어, 한 번 계산한 뒤 일정 시간 재사용합니다.
+-- (장르, 개봉연도, 러닝타임, 연령등급) 조합별로 저장합니다. "전체"는 각 *_key에 "ALL"로 저장됩니다
+-- (러닝타임은 그 외 "under120"/"over120", 연령등급은 그 외 general/age12/age15/age19/unknown). KMDB
+-- 카탈로그 전체(5만 건 이상)를 매 요청마다 끝까지 훑을 수 없어, 한 번 계산한 뒤 일정 시간 재사용합니다.
 CREATE TABLE IF NOT EXISTS movie_count_cache (
-    genre_key   VARCHAR(50) NOT NULL,
-    year_key    VARCHAR(10) NOT NULL,
-    runtime_key VARCHAR(10) NOT NULL DEFAULT 'ALL',
-    total_count INT         NOT NULL,
-    computed_at DATETIME    NOT NULL,
-    PRIMARY KEY (genre_key, year_key, runtime_key)
+    genre_key      VARCHAR(50) NOT NULL,
+    year_key       VARCHAR(10) NOT NULL,
+    runtime_key    VARCHAR(10) NOT NULL DEFAULT 'ALL',
+    age_rating_key VARCHAR(10) NOT NULL DEFAULT 'ALL',
+    total_count    INT         NOT NULL,
+    computed_at    DATETIME    NOT NULL,
+    PRIMARY KEY (genre_key, year_key, runtime_key, age_rating_key)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
 
 -- 개봉연도로 필터링할 때(movie_count_cache와 같은 전체 스캔에서 함께 채워집니다) 실제 영화 목록을

@@ -2,12 +2,15 @@ import { useEffect, useState } from 'react'
 import { useAuth } from '../../auth/AuthContext'
 import { getPopularMovies, searchMovies } from '../../api/movieApi'
 import { getPreferredGenres } from '../../api/userApi'
+import { getRecentlyViewed } from '../../api/recentlyViewedApi'
 import { genreLabel as translateGenre } from '../MovieList/components/filterOptions'
+import { enrichAsMovie } from '../../utils/enrichMovie'
 import AiRecommendBanner from './components/AiRecommendBanner'
 import MovieSection from './components/MovieSection'
 
 const GENRE_SEARCH_PAGE_SIZE = 20
 const RECOMMENDED_SECTION_SIZE = 14
+const RECENTLY_VIEWED_SIZE = 14
 
 // 선호 장르가 여러 개면 장르별로 나눠 검색한 뒤 하나로 합치고, 최신 개봉작이 앞에 오도록 정렬합니다.
 // KMDB genre 검색 파라미터는 한 번에 장르 하나만 받기 때문에(부분일치), 장르별로 따로 호출해야 합니다.
@@ -38,6 +41,7 @@ function HomePage() {
   const [popularMovies, setPopularMovies] = useState([])
   const [recommendedMovies, setRecommendedMovies] = useState([])
   const [preferredGenres, setPreferredGenres] = useState([])
+  const [recentlyViewedMovies, setRecentlyViewedMovies] = useState([])
   const [status, setStatus] = useState('loading') // loading | ready | error
 
   useEffect(() => {
@@ -67,6 +71,21 @@ function HomePage() {
     }
   }, [user.id])
 
+  // 최근 본 영화는 다른 섹션과 달리 실패해도 페이지 전체를 에러로 보내지 않고 그냥 섹션을 숨깁니다.
+  useEffect(() => {
+    let cancelled = false
+    getRecentlyViewed(user.id, RECENTLY_VIEWED_SIZE)
+      .then((items) => Promise.all(items.map(enrichAsMovie)))
+      .then((movies) => {
+        if (cancelled) return
+        setRecentlyViewedMovies(movies)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [user.id])
+
   const hasPreferredGenres = preferredGenres.length > 0
   const genreLabelText = preferredGenres.map(translateGenre).join(', ')
 
@@ -83,11 +102,19 @@ function HomePage() {
 
       {status === 'ready' && (
         <>
+          {recentlyViewedMovies.length > 0 && (
+            <MovieSection
+              icon="🕒"
+              title="최근 조회한 영화"
+              movies={recentlyViewedMovies}
+              viewAllTo="/recently-viewed"
+            />
+          )}
           <MovieSection icon="🔥" title="지금 인기 있는 영화" movies={popularMovies} />
           {hasPreferredGenres && (
             <MovieSection
               icon="🎯"
-              title={`취향저격 신작 (장르: ${genreLabelText})`}
+              title={`취향저격 (장르: ${genreLabelText})`}
               movies={recommendedMovies}
               viewAllTo={recommendedViewAllTo}
               viewAllLabel="더보기"

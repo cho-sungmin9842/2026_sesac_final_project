@@ -1,3 +1,5 @@
+import HorizontalScroll from '../../../components/common/HorizontalScroll'
+
 // 사용자 예매 화면의 좌석 배치도(SeatMap)와 같은 레이아웃(왼쪽/가운데/오른쪽 3블록, 통로 간격)이지만,
 // 관리자 화면은 다크 테마이고 선택/클릭이 필요 없는 읽기 전용 현황판이라 별도 컴포넌트로 둡니다.
 const EDGE_BLOCK_SIZE = 3
@@ -27,7 +29,7 @@ function AdminSeatMap({ seats }) {
 
       {/* 열 수(14)×좌석 크기+통로 간격을 합치면 모바일 화면 폭보다 넓어질 수 있어, 이 영역만 가로
           스크롤되게 감싸둡니다 - 안 그러면 이 좌석판 때문에 페이지 전체가 옆으로 밀립니다. */}
-      <div className="overflow-x-auto">
+      <HorizontalScroll>
         <div className="flex w-fit flex-col items-center gap-1.5">
           <div className="flex items-center gap-1.5">
             <span className="w-4" />
@@ -67,7 +69,7 @@ function AdminSeatMap({ seats }) {
             </div>
           ))}
         </div>
-      </div>
+      </HorizontalScroll>
 
       <div className="mt-6 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-xs text-gray-400">
         <span className="flex items-center gap-1.5">

@@ -38,6 +38,9 @@ public class BookingService {
     // (화면에는 인원 구분별 합계만 있고 "이 좌석은 성인용"처럼 좌석별 지정이 없으므로, 어떤 좌석이 어느
     // 구분이든 요금에는 영향이 없습니다 - 같은 구분이면 좌석 위치와 무관하게 요금이 같기 때문입니다).
     private static final List<String> CATEGORY_ORDER = List.of("adult", "teen", "child", "senior");
+    // 1회 예매당 선택 가능한 인원(전체 구분 합계) 상한 - 실제 멀티플렉스도 보통 9~10명으로 제한합니다.
+    // 프론트(BookingSeatPage)도 같은 값으로 +버튼을 미리 막지만, 여기서도 한 번 더 확실히 거릅니다.
+    private static final int MAX_TICKETS_PER_BOOKING = 10;
     private static final Map<String, String> CATEGORY_LABELS = Map.of(
             "adult", "성인", "teen", "청소년", "child", "어린이", "senior", "우대"
     );
@@ -379,11 +382,11 @@ public class BookingService {
     }
 
     // 요청받은 좌석 id 순서대로, 인원 구분 순서(성인→청소년→어린이→우대)대로 그 수만큼씩 배정합니다.
+    // 인원 수 합계와 좌석 수가 어긋나면(예: 결제 대기 중 좌석 하나가 다른 사용자에게 선점돼 좌석 목록만
+    // 줄어든 경우) seatIds를 실제로 인덱싱하기 전에 걸러내야, IndexOutOfBoundsException이 그대로
+    // 사용자에게 노출되는 일이 없습니다.
     private List<BookingSeat> assignCategories(List<Long> seatIds, Map<String, Integer> ticketCounts, int seatCount) {
-        List<BookingSeat> result = new ArrayList<>();
-        int index = 0;
         int totalTickets = 0;
-
         for (String category : CATEGORY_ORDER) {
             Integer count = ticketCounts.get(category);
             if (count == null) {
@@ -393,10 +396,10 @@ public class BookingService {
                 throw new ApiException("인원 수는 0 이상이어야 합니다.", HttpStatus.BAD_REQUEST);
             }
             totalTickets += count;
-            for (int i = 0; i < count; i++) {
-                result.add(new BookingSeat(seatIds.get(index), category));
-                index++;
-            }
+        }
+
+        if (totalTickets > MAX_TICKETS_PER_BOOKING) {
+            throw new ApiException("1회 예매는 최대 " + MAX_TICKETS_PER_BOOKING + "명까지 가능합니다.", HttpStatus.BAD_REQUEST);
         }
 
         for (String category : ticketCounts.keySet()) {
@@ -405,8 +408,18 @@ public class BookingService {
             }
         }
 
-        if (totalTickets != seatCount) {
+        if (totalTickets != seatCount || totalTickets != seatIds.size()) {
             throw new ApiException("선택한 인원 수와 좌석 수가 일치하지 않습니다.", HttpStatus.BAD_REQUEST);
+        }
+
+        List<BookingSeat> result = new ArrayList<>();
+        int index = 0;
+        for (String category : CATEGORY_ORDER) {
+            int count = ticketCounts.getOrDefault(category, 0);
+            for (int i = 0; i < count; i++) {
+                result.add(new BookingSeat(seatIds.get(index), category));
+                index++;
+            }
         }
         return result;
     }

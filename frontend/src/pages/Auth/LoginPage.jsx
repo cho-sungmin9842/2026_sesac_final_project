@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../auth/AuthContext'
 import AuthShell from './components/AuthShell'
 import FindPasswordDialog from './components/FindPasswordDialog'
+import { josa } from '../../utils/korean'
 
 function LoginPage() {
   const { login } = useAuth()
@@ -32,7 +33,8 @@ function LoginPage() {
     if (!username.trim()) missing.push('아이디')
     if (!password) missing.push('비밀번호')
     if (missing.length > 0) {
-      setError(`${missing.join(', ')}을(를) 입력해주세요.`)
+      const lastMissing = missing[missing.length - 1]
+      setError(`${missing.join(', ')}${josa(lastMissing, ['을', '를'])} 입력해주세요.`)
       return
     }
 

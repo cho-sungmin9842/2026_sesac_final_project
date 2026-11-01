@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { getGenres } from '../../../api/movieApi'
-import { genreLabel, runtimeFilters, years } from './filterOptions'
+import { ageRatingFilters, genreLabel, runtimeFilters, years } from './filterOptions'
 
 function FilterGroup({ title, options, isActive, onSelect, getLabel = (option) => option }) {
   return (
@@ -64,7 +64,10 @@ function FilterSidebar({ filters, onChange, onToggleGenre }) {
   }, [])
 
   const activeFilterCount =
-    (filters.genres.length > 0 ? 1 : 0) + (filters.year !== '전체' ? 1 : 0) + (filters.runtime !== '전체' ? 1 : 0)
+    (filters.genres.length > 0 ? 1 : 0) +
+    (filters.year !== '전체' ? 1 : 0) +
+    (filters.runtime !== '전체' ? 1 : 0) +
+    (filters.ageRating !== '전체' ? 1 : 0)
 
   return (
     <aside className="w-full shrink-0 md:w-56">
@@ -91,6 +94,12 @@ function FilterSidebar({ filters, onChange, onToggleGenre }) {
           options={runtimeFilters}
           isActive={(option) => filters.runtime === option}
           onSelect={(value) => onChange('runtime', value)}
+        />
+        <FilterGroup
+          title="연령등급"
+          options={ageRatingFilters}
+          isActive={(option) => filters.ageRating === option}
+          onSelect={(value) => onChange('ageRating', value)}
         />
       </div>
     </aside>

@@ -11,9 +11,9 @@ import java.time.LocalDateTime;
 
 /**
  * "전체 영화" 목록 화면 상단의 건수(예: "53,176건") 캐시. nation이 정확히 "대한민국" 하나뿐인 영화만 센
- * 정확한 개수를 (장르, 개봉연도, 러닝타임) 조합별로 저장해둡니다. KMDB 카탈로그 전체(5만 건 이상)를
- * 끝까지 훑어야 정확한 개수를 알 수 있어 매 요청마다 다시 셀 수 없으므로, 한 번 계산한 뒤 일정 시간
- * (MovieCountCacheService의 CACHE_TTL) 동안 재사용합니다.
+ * 정확한 개수를 (장르, 개봉연도, 러닝타임, 연령등급) 조합별로 저장해둡니다. KMDB 카탈로그 전체(5만 건
+ * 이상)를 끝까지 훑어야 정확한 개수를 알 수 있어 매 요청마다 다시 셀 수 없으므로, 한 번 계산한 뒤 일정
+ * 시간(MovieCountCacheService의 CACHE_TTL) 동안 재사용합니다.
  */
 @Entity
 @Table(name = "movie_count_cache")
@@ -36,6 +36,12 @@ public class MovieCountCache {
     @Column(name = "runtime_key", length = 10)
     private String runtimeKey;
 
+    // 연령등급을 고르지 않았을 때("전체")도 "ALL"을 키로 쓰고, 그 외엔 KmdbTextUtils의
+    // general/age12/age15/age19/unknown 중 하나입니다.
+    @Id
+    @Column(name = "age_rating_key", length = 10)
+    private String ageRatingKey;
+
     @Column(name = "total_count", nullable = false)
     private int totalCount;
 
@@ -45,10 +51,13 @@ public class MovieCountCache {
     protected MovieCountCache() {
     }
 
-    public MovieCountCache(String genreKey, String yearKey, String runtimeKey, int totalCount, LocalDateTime computedAt) {
+    public MovieCountCache(
+            String genreKey, String yearKey, String runtimeKey, String ageRatingKey, int totalCount, LocalDateTime computedAt
+    ) {
         this.genreKey = genreKey;
         this.yearKey = yearKey;
         this.runtimeKey = runtimeKey;
+        this.ageRatingKey = ageRatingKey;
         this.totalCount = totalCount;
         this.computedAt = computedAt;
     }

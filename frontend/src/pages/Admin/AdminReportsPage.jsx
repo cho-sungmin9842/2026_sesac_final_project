@@ -3,6 +3,8 @@ import { useAuth } from '../../auth/AuthContext'
 import { deleteReviewAsAdmin, getAllReviewsForAdmin } from '../../api/reviewApi'
 import ReportTable from './components/ReportTable'
 import StatCard from './components/StatCard'
+import ConfirmDialog from '../../components/common/ConfirmDialog'
+import InfoDialog from '../../components/common/InfoDialog'
 
 function isToday(dateTimeStr) {
   const date = new Date(dateTimeStr)
@@ -20,6 +22,8 @@ function AdminReportsPage() {
   const { user } = useAuth()
   const [reviews, setReviews] = useState([])
   const [status, setStatus] = useState('loading') // loading | ready | error
+  const [pendingDeleteReviewId, setPendingDeleteReviewId] = useState(null)
+  const [deleteErrorMessage, setDeleteErrorMessage] = useState('')
 
   useEffect(() => {
     let cancelled = false
@@ -38,10 +42,19 @@ function AdminReportsPage() {
     }
   }, [user.id])
 
-  const handleDelete = async (reviewId) => {
-    if (!window.confirm('이 리뷰를 삭제하시겠습니까?')) return
-    await deleteReviewAsAdmin(reviewId, user.id)
-    setReviews((prev) => prev.filter((review) => review.id !== reviewId))
+  const handleDelete = (reviewId) => {
+    setPendingDeleteReviewId(reviewId)
+  }
+
+  const confirmDelete = async () => {
+    const reviewId = pendingDeleteReviewId
+    setPendingDeleteReviewId(null)
+    try {
+      await deleteReviewAsAdmin(reviewId, user.id)
+      setReviews((prev) => prev.filter((review) => review.id !== reviewId))
+    } catch (error) {
+      setDeleteErrorMessage(error.message)
+    }
   }
 
   const todayCount = reviews.filter((review) => isToday(review.createdAt)).length
@@ -68,6 +81,21 @@ function AdminReportsPage() {
         )}
         {status === 'ready' && reviews.length > 0 && <ReportTable reviews={reviews} onDelete={handleDelete} />}
       </div>
+
+      {pendingDeleteReviewId != null && (
+        <ConfirmDialog
+          title="리뷰 삭제"
+          message="이 리뷰를 삭제하시겠습니까?"
+          confirmLabel="삭제"
+          danger
+          onConfirm={confirmDelete}
+          onCancel={() => setPendingDeleteReviewId(null)}
+        />
+      )}
+
+      {deleteErrorMessage && (
+        <InfoDialog title="리뷰 삭제 실패" message={deleteErrorMessage} tone="error" onClose={() => setDeleteErrorMessage('')} />
+      )}
     </div>
   )
 }

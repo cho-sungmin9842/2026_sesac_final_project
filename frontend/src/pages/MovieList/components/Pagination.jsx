@@ -14,7 +14,7 @@ function PageButton({ children, onClick, disabled, active }) {
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className={`min-w-9 rounded-md px-3 py-1.5 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-40 ${
+      className={`min-w-8 rounded-md px-2 py-1.5 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-40 sm:min-w-9 sm:px-3 ${
         active ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-gray-300 hover:bg-slate-700'
       }`}
     >
@@ -29,7 +29,7 @@ function Pagination({ page, totalPages, onChange }) {
   const pageNumbers = getPageNumbers(page, totalPages)
 
   return (
-    <nav className="mt-8 flex items-center justify-center gap-2">
+    <nav className="mt-8 flex flex-wrap items-center justify-center gap-1.5 sm:gap-2">
       <PageButton onClick={() => onChange(1)} disabled={page === 1}>
         «
       </PageButton>

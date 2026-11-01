@@ -5,6 +5,7 @@ import AdminLayout from './layouts/AdminLayout'
 import HomePage from './pages/Home/HomePage'
 import MovieListPage from './pages/MovieList/MovieListPage'
 import MovieDetailPage from './pages/MovieDetail/MovieDetailPage'
+import RecentlyViewedPage from './pages/RecentlyViewed/RecentlyViewedPage'
 import AiChatPage from './pages/AiChat/AiChatPage'
 import BookingListPage from './pages/Booking/BookingListPage'
 import BookingSeatPage from './pages/Booking/BookingSeatPage'
@@ -37,6 +38,7 @@ function App() {
           <Route path="/" element={<HomePage />} />
           <Route path="/movies" element={<MovieListPage />} />
           <Route path="/movies/:id" element={<MovieDetailPage />} />
+          <Route path="/recently-viewed" element={<RecentlyViewedPage />} />
           <Route path="/ai-chat" element={<AiChatPage />} />
           <Route path="/booking" element={<BookingListPage />} />
           <Route path="/booking/:id" element={<BookingSeatPage />} />

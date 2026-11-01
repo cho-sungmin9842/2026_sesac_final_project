@@ -5,6 +5,7 @@ import { useWishlist } from '../../wishlist/WishlistContext'
 import { getMovieDetail } from '../../api/movieApi'
 import { addReview, deleteReview, getReviews, updateReview } from '../../api/reviewApi'
 import { addWatched, isWatched, removeWatched } from '../../api/watchedApi'
+import { recordMovieView } from '../../api/recentlyViewedApi'
 import AiSummaryBox from './components/AiSummaryBox'
 import OtherVideoButtons from './components/OtherVideoButtons'
 import PosterLink from './components/PosterLink'
@@ -45,10 +46,13 @@ function MovieDetailPage() {
     Promise.all([getMovieDetail(id), getReviews(id), isWatched(user.id, id)])
       .then(([dto, reviewList, watchedFlag]) => {
         if (cancelled) return
-        setDetail(normalizeDetail(dto))
+        const normalized = normalizeDetail(dto)
+        setDetail(normalized)
         setReviews(reviewList)
         setWatched(watchedFlag)
         setStatus('ready')
+        // 홈 화면 "최근 본 영화" 섹션용 기록 - 실패해도 상세 페이지 열람 자체에는 영향 없어야 하므로 조용히 무시합니다.
+        recordMovieView(user.id, { movieId: id, movieTitle: normalized.title, posterUrl: normalized.posterUrl }).catch(() => {})
       })
       .catch((error) => {
         if (cancelled) return
