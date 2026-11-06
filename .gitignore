@@ -1,3 +1,6 @@
 # 스틸컷 화질 개선용 CodeFormer 로컬 도구. Python venv/모델 가중치/클론한 저장소가 전부 수백MB~수GB라
 # git으로 관리하지 않습니다(각자 로컬에서 tools/README.md 안내대로 다시 받으면 됩니다).
 tools/
+
+# docker-compose.yml 이 읽는 루트 .env (DB 비밀번호, KMDB/Gemini 키가 들어가므로 git 에 올리지 않습니다. 템플릿은 .env.example)
+/.env

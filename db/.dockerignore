@@ -1,0 +1,9 @@
+# 이미지에는 schema.sql 만 필요합니다. 나머지는 빌드 컨텍스트에서 제외합니다.
+# (docker-compose.yml 에는 개발용 비밀번호가 적혀 있으므로 이미지에 섞여 들어가면 안 됩니다.)
+docker-compose.yml
+docker-compose.*.yml
+Dockerfile
+.dockerignore
+*.md
+*.env
+.env*

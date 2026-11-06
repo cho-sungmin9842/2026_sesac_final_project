@@ -27,9 +27,17 @@ FROM nginx:1.27-alpine
 COPY nginx.conf.template /etc/nginx/templates/default.conf.template
 COPY --from=build /app/dist /usr/share/nginx/html
 
-# /api/ 요청을 보낼 백엔드 주소. docker compose 에서는 서비스 이름(backend), 쿠버네티스에서는 Service 이름을 씁니다.
-# 실행할 때 -e API_UPSTREAM=http://다른주소:8080 으로 바꿀 수 있습니다.
-ENV API_UPSTREAM=http://backend:8080
+# /api/ 요청을 보낼 백엔드 주소(API_UPSTREAM)는 이미지에 넣지 않고, 실행할 때 환경변수 파일(frontend.env)로 넘깁니다.
+#   frontend.env 예) API_UPSTREAM=http://backend:8080
+#   docker run : --env-file ~/moviepick/frontend.env
+#   compose    : env_file: ~/moviepick/frontend.env
+# 값이 없으면 nginx 는 오류 없이 떠 버리고 /api 요청만 조용히 실패하므로, 시작 단계에서 바로 멈추도록 확인 스크립트를 둡니다
+# (nginx 이미지는 /docker-entrypoint.d/*.sh 를 번호 순서로 실행하며, 템플릿 치환(20-)보다 앞선 19- 로 둡니다).
+RUN printf '%s\n' \
+      '#!/bin/sh' \
+      ': "${API_UPSTREAM:?API_UPSTREAM 환경변수가 없습니다. frontend.env 를 --env-file(또는 compose env_file)로 넘기세요.}"' \
+      > /docker-entrypoint.d/19-require-api-upstream.sh \
+ && chmod +x /docker-entrypoint.d/19-require-api-upstream.sh
 
 # nginx.conf.template 의 resolver 에 쓰는 DNS 서버 주소(${NGINX_LOCAL_RESOLVERS})를 /etc/resolv.conf 에서 자동으로
 # 채워 주는 nginx 이미지 기능을 켭니다. 이 값이 없으면 치환이 안 돼 nginx 가 시작하지 못합니다. Docker 네트워크든

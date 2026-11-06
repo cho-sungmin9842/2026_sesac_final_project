@@ -4,6 +4,7 @@ import { useAuth } from '../../auth/AuthContext'
 import { getMovieSuggestions, getPersonSuggestions } from '../../api/movieApi'
 import NotificationBell from './NotificationBell'
 import ThemeToggle from '../common/ThemeToggle'
+import VersionBadge from '../common/VersionBadge'
 
 // 타이핑이 끝나고서야 요청하도록 이 시간만큼 기다립니다(그 전엔 이전 타이머를 취소) - 제목은 로컬
 // 캐시라 거의 즉시 응답되지만, 배우/감독은 KMDB를 직접 조회해 조금 더 걸리므로 그만큼 여유 있게
@@ -188,6 +189,9 @@ function Header() {
         <div className="ml-4 hidden max-w-xl flex-1 md:flex">{searchForm}</div>
 
         <div className="ml-auto hidden items-center gap-4 md:flex">
+          {/* 화면 폭별 표시: 1100px 이상은 188px 로 넓게 채우고, 900~1099px 은 글자를 16px 로 줄여 작게 표시하며,
+              900px 보다 좁으면 숨깁니다(그 폭에서는 배지 때문에 메뉴/로그아웃 글자가 세로로 꺾이기 때문). */}
+          <VersionBadge className="block shrink-0 min-[1100px]:w-[188px] max-[1100px]:text-[16px] max-[900px]:hidden" />
           <ThemeToggle />
           <NotificationBell />
           <span className="text-sm text-gray-400">{user?.nickname}</span>

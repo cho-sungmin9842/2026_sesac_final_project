@@ -1,6 +1,7 @@
 import { NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../auth/AuthContext'
 import ThemeToggle from '../common/ThemeToggle'
+import VersionBadge from '../common/VersionBadge'
 
 const ADMIN_LINKS = [
   { to: '/admin/reports', label: '리뷰 관리', icon: '🚩' },
@@ -64,6 +65,10 @@ function AdminSidebar({ open, onClose }) {
             </NavLink>
           ))}
         </nav>
+
+        <div className="-mx-1 mb-3">
+          <VersionBadge className="block w-full" />
+        </div>
 
         <div className="border-t border-white/5 px-2 pt-4 text-sm text-gray-400">
           <p className="mb-2 truncate">관리자</p>

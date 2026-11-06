@@ -39,6 +39,8 @@ gemini:
   model: gemini-flash-lite-latest
 
 app:
+  # 화면에 표시하는 앱 버전(GET /api/app-version). 버전을 올릴 때는 이 값을 고치거나 APP_VERSION 환경변수로 덮어씁니다.
+  version: ${APP_VERSION:V.2.0}
   cors:
     allowed-origins: http://localhost:5173,http://localhost:5174
 
