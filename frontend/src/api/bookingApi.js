@@ -30,8 +30,23 @@ export function cancelBooking(userId, bookingId) {
   return request(`/api/bookings/${bookingId}`, { method: 'DELETE', userId })
 }
 
-// 관리자 "예매/상영관 현황" 화면의 기간별 예매 추이 그래프 - 오늘 포함 최근 days일, 예매 없는 날도
-// 0건으로 빠짐없이 채워서 내려옵니다.
-export function getBookingTrend(adminUserId, days = 14) {
-  return request(`/api/admin/bookings/trend?days=${days}`, { userId: adminUserId })
+// 관리자 "예매/상영관 현황" 화면의 기간별 예매 추이 그래프 - 접속 시점 기준 최근 4주(오늘 포함),
+// 예매 없는 날도 0건으로 빠짐없이 채워서 내려옵니다.
+export function getBookingTrend(adminUserId) {
+  return request('/api/admin/bookings/trend', { userId: adminUserId })
+}
+
+// 관리자 "예매/상영관 현황" 좌석 배치도 - 일반 사용자용 좌석 조회(getScreeningSeats)와 달리 예매
+// 완료 좌석마다 예매자 닉네임(bookerNickname)을 함께 내려받아, 좌석을 클릭하면 누가 예매했는지
+// 보여줄 수 있습니다.
+export function getAdminScreeningSeats(adminUserId, screeningId) {
+  return request(`/api/admin/bookings/screenings/${screeningId}/seats`, { userId: adminUserId })
+}
+
+// 관리자 "예매/상영관 현황" 좌석 배치도 - 예매 완료 좌석을 클릭해 그 자리에서 바로 취소합니다.
+// 일반 사용자 취소(cancelBooking)와 달리 본인 예매가 아니어도 취소할 수 있지만(고객 문의 대응 등
+// 관리자 개입이 필요한 예외 상황을 위한 기능), 상영 임박/종료 마감 제한은 동일하게 적용됩니다 -
+// 이미 상영이 시작했거나 끝난 회차는 취소할 수 없습니다.
+export function cancelBookingForAdmin(adminUserId, bookingId) {
+  return request(`/api/admin/bookings/${bookingId}`, { method: 'DELETE', userId: adminUserId })
 }

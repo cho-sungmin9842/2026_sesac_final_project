@@ -20,6 +20,11 @@ const QUICK_REPLIES = [
 
 const GREETING = { id: 0, from: 'ai', type: 'text', content: '안녕하세요! 저는 새싹무비 AI 큐레이터예요 🎬 오늘 어떤 영화를 찾아드릴까요?' }
 
+// 크롬/엣지는 webkit 접두사로, 최신 브라우저는 접두사 없이 제공합니다. 둘 다 없으면(사파리/파이어폭스
+// 일부 등) 마이크 버튼 자체를 숨깁니다.
+const SpeechRecognitionImpl =
+  typeof window !== 'undefined' ? window.SpeechRecognition || window.webkitSpeechRecognition : null
+
 // DB에 저장된 메시지(role/content/movies/seatStatus)를 화면에서 쓰는 메시지 형태로 바꿉니다.
 function fromSavedMessage(saved, id) {
   const from = saved.role === 'user' ? 'user' : 'ai'
@@ -61,9 +66,11 @@ function AiChatPage() {
   const [isSending, setIsSending] = useState(false)
   const [pendingDeleteConversationId, setPendingDeleteConversationId] = useState(null)
   const [deleteErrorMessage, setDeleteErrorMessage] = useState('')
+  const [isListening, setIsListening] = useState(false)
   const nextId = useRef(1)
   const bottomRef = useRef(null)
   const inputRef = useRef(null)
+  const recognitionRef = useRef(null)
   // sendMessage가 새로 만들어진 conversationId를 activeConversationId에 반영할 때, 그 대화의 메시지는
   // 이미 화면에 다 있으므로 바로 아래 effect가 서버에서 또 불러오지 않도록 막는 플래그입니다.
   const skipNextFetchRef = useRef(false)
@@ -141,9 +148,52 @@ function AiChatPage() {
     textarea.style.height = `${textarea.scrollHeight}px`
   }, [input])
 
+  // 페이지를 벗어날 때 마이크가 계속 켜진 채로 남지 않도록 정리합니다.
+  useEffect(() => {
+    return () => {
+      recognitionRef.current?.stop()
+    }
+  }, [])
+
+  // 말하는 동안 중간 결과(interim)까지 입력창에 바로 반영해서, 다 말하기 전에도 인식이 되고 있다는
+  // 걸 눈으로 확인할 수 있게 합니다. 전송은 자동으로 하지 않고, 사용자가 내용을 확인한 뒤 직접
+  // 보내도록 둡니다(잘못 인식됐을 때 고칠 기회를 주기 위함).
+  const handleToggleListening = () => {
+    if (!SpeechRecognitionImpl || isSending) return
+
+    if (isListening) {
+      recognitionRef.current?.stop()
+      return
+    }
+
+    const recognition = new SpeechRecognitionImpl()
+    recognition.lang = 'ko-KR'
+    recognition.interimResults = true
+    recognition.continuous = false
+
+    recognition.onresult = (event) => {
+      const transcript = Array.from(event.results)
+        .map((result) => result[0].transcript)
+        .join('')
+      setInput(transcript)
+    }
+    recognition.onerror = () => {
+      setIsListening(false)
+    }
+    recognition.onend = () => {
+      setIsListening(false)
+    }
+
+    recognitionRef.current = recognition
+    recognition.start()
+    setIsListening(true)
+  }
+
   const sendMessage = async (text) => {
     const trimmed = text.trim()
     if (!trimmed || isSending) return
+
+    recognitionRef.current?.stop()
 
     const userMessage = { id: nextId.current++, from: 'user', type: 'text', content: trimmed }
     const loadingMessageId = nextId.current++
@@ -311,9 +361,23 @@ function AiChatPage() {
             }}
             rows={1}
             disabled={isSending}
-            placeholder="메시지를 입력하세요... (Shift+Enter로 줄바꿈)"
+            placeholder={isListening ? '듣고 있어요... 말씀해주세요' : '메시지를 입력하세요... (Shift+Enter로 줄바꿈)'}
             className="max-h-40 flex-1 resize-none overflow-y-auto rounded-lg bg-slate-900 px-4 py-3 text-sm text-gray-100 placeholder:text-gray-500 focus:outline-none disabled:opacity-60"
           />
+          {SpeechRecognitionImpl && (
+            <button
+              type="button"
+              onClick={handleToggleListening}
+              disabled={isSending}
+              aria-label={isListening ? '음성 입력 중지' : '음성으로 입력'}
+              title={isListening ? '음성 입력 중지' : '음성으로 입력'}
+              className={`flex w-11 items-center justify-center rounded-lg text-white disabled:cursor-not-allowed disabled:opacity-60 ${
+                isListening ? 'animate-pulse bg-rose-600 hover:bg-rose-500' : 'bg-slate-700 hover:bg-slate-600'
+              }`}
+            >
+              {isListening ? '⏺' : '🎤'}
+            </button>
+          )}
           <button
             type="submit"
             disabled={isSending}

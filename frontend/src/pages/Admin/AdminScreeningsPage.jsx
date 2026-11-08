@@ -1,14 +1,13 @@
 import { useEffect, useState } from 'react'
 import { useAuth } from '../../auth/AuthContext'
-import { getScreenings, getScreeningSeats } from '../../api/screeningApi'
+import { getScreenings } from '../../api/screeningApi'
 import { getNowShowing } from '../../api/movieApi'
-import { getBookingTrend } from '../../api/bookingApi'
+import { getBookingTrend, getAdminScreeningSeats, cancelBookingForAdmin } from '../../api/bookingApi'
 import StatCard from './components/StatCard'
 import AdminSeatMap from './components/AdminSeatMap'
 import BookingTrendChart from './components/BookingTrendChart'
 import HorizontalScroll from '../../components/common/HorizontalScroll'
-
-const BOOKING_TREND_DAYS = 14
+import InfoDialog from '../../components/common/InfoDialog'
 
 function toHourMinute(timeStr) {
   return timeStr.slice(0, 5)
@@ -20,6 +19,7 @@ function AdminScreeningsPage() {
   const { user } = useAuth()
   const [bookingTrend, setBookingTrend] = useState([])
   const [bookingTrendStatus, setBookingTrendStatus] = useState('loading') // loading | ready | error
+  const [trendMetric, setTrendMetric] = useState('count') // count | revenue
   const [movies, setMovies] = useState([])
   const [moviesStatus, setMoviesStatus] = useState('loading') // loading | ready | error
   const [selectedMovieId, setSelectedMovieId] = useState('')
@@ -29,10 +29,11 @@ function AdminScreeningsPage() {
   const [occupancy, setOccupancy] = useState([])
   const [occupancyStatus, setOccupancyStatus] = useState('idle') // idle | loading | ready | error
   const [selectedScreeningId, setSelectedScreeningId] = useState(null)
+  const [cancelErrorMessage, setCancelErrorMessage] = useState('')
 
   useEffect(() => {
     let cancelled = false
-    getBookingTrend(user.id, BOOKING_TREND_DAYS)
+    getBookingTrend(user.id)
       .then((result) => {
         if (cancelled) return
         setBookingTrend(result)
@@ -109,7 +110,7 @@ function AdminScreeningsPage() {
 
     Promise.all(
       matchingScreenings.map((screening) =>
-        getScreeningSeats(screening.id).then((seats) => ({
+        getAdminScreeningSeats(user.id, screening.id).then((seats) => ({
           screeningId: screening.id,
           showtime: toHourMinute(screening.startTime),
           totalSeats: seats.length,
@@ -135,6 +136,45 @@ function AdminScreeningsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTheater, selectedDate, screenings])
 
+  // 좌석 배치도에서 예매를 취소한 직후 현재 보고 있는 회차의 좌석 현황을 다시 불러옵니다. 위 effect와
+  // 달리 사용자가 직접 트리거하는 1회성 동작이라 cancelled 가드 없이 단순하게 둡니다.
+  const refreshOccupancy = () => {
+    if (matchingScreenings.length === 0) return
+    setOccupancyStatus('loading')
+    Promise.all(
+      matchingScreenings.map((screening) =>
+        getAdminScreeningSeats(user.id, screening.id).then((seats) => ({
+          screeningId: screening.id,
+          showtime: toHourMinute(screening.startTime),
+          totalSeats: seats.length,
+          bookedSeats: seats.filter((seat) => seat.status === 'BOOKED'),
+          seats,
+        })),
+      ),
+    )
+      .then((rows) => {
+        setOccupancy(rows)
+        // 취소 전 보고 있던 회차가 여전히 있으면 그대로 유지하고, 없으면(목록 자체가 비면) 첫 회차로.
+        setSelectedScreeningId((prev) =>
+          rows.some((row) => row.screeningId === prev) ? prev : (rows[0]?.screeningId ?? null),
+        )
+        setOccupancyStatus('ready')
+      })
+      .catch(() => {
+        setOccupancyStatus('error')
+      })
+  }
+
+  const handleCancelBooking = (bookingId) =>
+    cancelBookingForAdmin(user.id, bookingId)
+      .then(() => {
+        refreshOccupancy()
+      })
+      .catch((error) => {
+        setCancelErrorMessage(error.message)
+        throw error
+      })
+
   const totalReserved = occupancy.reduce((sum, row) => sum + row.bookedSeats.length, 0)
   const totalCapacity = occupancy.reduce((sum, row) => sum + row.totalSeats, 0)
   const occupancyRate = totalCapacity > 0 ? Math.round((totalReserved / totalCapacity) * 100) : 0
@@ -147,10 +187,32 @@ function AdminScreeningsPage() {
       </p>
 
       <div className="mt-6 rounded-xl bg-slate-900/60 p-4">
-        <h2 className="mb-3 text-sm font-semibold text-gray-200">최근 {BOOKING_TREND_DAYS}일 예매 추이 (전체 영화)</h2>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-sm font-semibold text-gray-200">최근 4주 예매 추이 (전체 영화)</h2>
+          <div className="flex gap-1 rounded-lg bg-slate-900 p-1">
+            <button
+              type="button"
+              onClick={() => setTrendMetric('count')}
+              className={`rounded-md px-3 py-1 text-xs font-medium ${
+                trendMetric === 'count' ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:text-gray-200'
+              }`}
+            >
+              건수
+            </button>
+            <button
+              type="button"
+              onClick={() => setTrendMetric('revenue')}
+              className={`rounded-md px-3 py-1 text-xs font-medium ${
+                trendMetric === 'revenue' ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:text-gray-200'
+              }`}
+            >
+              매출액
+            </button>
+          </div>
+        </div>
         {bookingTrendStatus === 'loading' && <p className="text-sm text-gray-400">불러오는 중...</p>}
         {bookingTrendStatus === 'error' && <p className="text-sm text-red-400">예매 추이를 불러오지 못했습니다.</p>}
-        {bookingTrendStatus === 'ready' && <BookingTrendChart data={bookingTrend} />}
+        {bookingTrendStatus === 'ready' && <BookingTrendChart data={bookingTrend} metric={trendMetric} />}
       </div>
 
       <div className="mt-6 flex flex-wrap gap-3">
@@ -263,10 +325,19 @@ function AdminScreeningsPage() {
                 <p className="mb-4 text-sm text-gray-400">
                   <span className="font-semibold text-white">{row.showtime}</span> 회차 좌석 현황
                 </p>
-                <AdminSeatMap seats={row.seats} />
+                <AdminSeatMap seats={row.seats} onCancelBooking={handleCancelBooking} />
               </div>
             ))}
         </div>
+      )}
+
+      {cancelErrorMessage && (
+        <InfoDialog
+          title="예매 취소 실패"
+          message={cancelErrorMessage}
+          tone="error"
+          onClose={() => setCancelErrorMessage('')}
+        />
       )}
     </div>
   )

@@ -1,8 +1,13 @@
 import { useState } from 'react'
 
+// KMDB 스틸컷 원본은 대체로 200px대의 작은 썸네일이라(실측: 207×138px 수준), 그대로 작게 띄우면
+// 휑해 보입니다. CGV 등 극장 사이트의 이미지 갤러리처럼 모든 컷이 같은 크기의 고정 프레임 안에서
+// 슬라이드로 넘어가도록 하고, 프레임 자체는 원본보다 한 단계 넉넉하게(약 1.25배 수준) 잡았습니다.
+const FRAME_WIDTH = 320
+const FRAME_HEIGHT = 213
+
 function StillDialog({ stillUrls, index, onClose, onPrev, onNext }) {
   const hasMultiple = stillUrls.length > 1
-  const displaySrc = stillUrls[index]
 
   return (
     <div
@@ -10,27 +15,44 @@ function StillDialog({ stillUrls, index, onClose, onPrev, onNext }) {
       onClick={onClose}
     >
       <div className="relative" onClick={(event) => event.stopPropagation()}>
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="닫기"
-          className="absolute -top-10 right-0 flex h-8 w-8 items-center justify-center rounded-full bg-white/10 text-lg text-white hover:bg-white/20"
+        {/* 카운터/닫기 버튼은 사진 위에 얹지 않고, 프레임 바로 위에 별도 줄로 둡니다(일반 문서
+            흐름이라 사진과 겹칠 일이 없습니다). */}
+        <div className="mb-2 flex items-center justify-between" style={{ maxWidth: '92vw' }}>
+          {hasMultiple ? (
+            <p className="text-sm font-medium text-gray-200">
+              {index + 1} / {stillUrls.length}
+            </p>
+          ) : (
+            <span />
+          )}
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="닫기"
+            className="flex h-8 w-8 items-center justify-center rounded-full bg-white/10 text-lg text-white hover:bg-white/20"
+          >
+            ✕
+          </button>
+        </div>
+
+        {/* 고정 크기 프레임 안에서 사진들을 가로로 나란히 두고, index에 맞춰 translateX로 밀어
+            CGV 갤러리처럼 좌우로 슬라이드되는 전환 효과를 줍니다. object-cover로 프레임을 빈틈없이
+            채웁니다(비율이 안 맞는 가장자리만 살짝 잘립니다). */}
+        <div
+          className="relative overflow-hidden rounded-lg bg-black"
+          style={{ width: FRAME_WIDTH, height: FRAME_HEIGHT, maxWidth: '92vw', maxHeight: '70svh' }}
         >
-          ✕
-        </button>
-
-        {hasMultiple && (
-          <p className="absolute -top-10 left-0 text-sm text-gray-300">
-            {index + 1} / {stillUrls.length}
-          </p>
-        )}
-
-        {/* 다이얼로그를 사진 원본 크기 그대로 보여줍니다(화면보다 큰 경우에만 화면 안에 들어오게 줄임). */}
-        <img
-          src={displaySrc}
-          alt={`스틸컷 ${index + 1}`}
-          className="max-h-[90svh] max-w-[92vw] rounded-lg object-contain"
-        />
+          <div
+            className="flex h-full transition-transform duration-300 ease-out"
+            style={{ width: `${stillUrls.length * 100}%`, transform: `translateX(-${(index * 100) / stillUrls.length}%)` }}
+          >
+            {stillUrls.map((url, i) => (
+              <div key={url} className="h-full shrink-0" style={{ width: `${100 / stillUrls.length}%` }}>
+                <img src={url} alt={`스틸컷 ${i + 1}`} loading="lazy" className="h-full w-full object-cover" />
+              </div>
+            ))}
+          </div>
+        </div>
 
         {hasMultiple && (
           <>

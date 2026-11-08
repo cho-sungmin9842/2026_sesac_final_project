@@ -88,14 +88,13 @@ public class MovieController {
     }
 
     /**
-     * 홈 화면 "지금 인기 있는 영화". 고정된 제목 목록이 아니라, 실제 사용자 리뷰 평균 평점이 minScore 이상인 영화를 평점순으로 내려줍니다.
+     * 홈 화면 "지금 인기 있는 영화". 사용자 리뷰 유무와 무관하게, KMDB에서 접속 시점 기준(releaseDts=오늘)
+     * 이후 개봉(예정)인 작품을 그대로 보여줍니다(리뷰 평점 기반으로 걸렀을 때 막 개봉한 신작이 전혀
+     * 노출되지 않는 문제가 있어 2026-11-08에 교체). KMDB가 응답한 건수를 자르지 않고 전부 돌려줍니다.
      */
     @GetMapping("/api/movies/popular")
-    public List<MovieSummaryDto> getPopular(
-            @RequestParam(defaultValue = "4") double minScore,
-            @RequestParam(defaultValue = "6") int limit
-    ) {
-        return movieService.getPopularMovies(minScore, limit);
+    public List<MovieSummaryDto> getPopular() {
+        return movieService.getPopularMovies();
     }
 
     /**

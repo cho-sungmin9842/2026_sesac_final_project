@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import MovieCard from '../../components/common/MovieCard'
 import { searchMovies } from '../../api/movieApi'
 import FilterSidebar from './components/FilterSidebar'
-import Pagination from './components/Pagination'
+import Pagination from '../../components/common/Pagination'
 import SortDropdown from './components/SortDropdown'
 
 const PAGE_SIZE = 15

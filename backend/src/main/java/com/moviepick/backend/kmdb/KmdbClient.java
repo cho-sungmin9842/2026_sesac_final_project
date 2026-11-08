@@ -47,7 +47,7 @@ public class KmdbClient {
     }
 
     public KmdbSearchResponse searchByTitle(
-            String title, String genre, String releaseDts, String releaseDte, int listCount, int startCount, String sort
+            String title, String genre, String releaseDts, String releaseDte, Integer listCount, int startCount, String sort
     ) {
         return searchByField("title", title, genre, releaseDts, releaseDte, listCount, startCount, sort);
     }
@@ -55,13 +55,13 @@ public class KmdbClient {
     // 검색창이 "영화, 배우, 감독 검색"이라 안내하고 있어서, 배우/감독 이름으로도 찾을 수 있어야 합니다.
     // actor/director는 2026-09-21에 실제 키로 검증된 파라미터입니다(예: actor=마동석, director=봉준호).
     public KmdbSearchResponse searchByActor(
-            String actor, String genre, String releaseDts, String releaseDte, int listCount, int startCount, String sort
+            String actor, String genre, String releaseDts, String releaseDte, Integer listCount, int startCount, String sort
     ) {
         return searchByField("actor", actor, genre, releaseDts, releaseDte, listCount, startCount, sort);
     }
 
     public KmdbSearchResponse searchByDirector(
-            String director, String genre, String releaseDts, String releaseDte, int listCount, int startCount, String sort
+            String director, String genre, String releaseDts, String releaseDte, Integer listCount, int startCount, String sort
     ) {
         return searchByField("director", director, genre, releaseDts, releaseDte, listCount, startCount, sort);
     }
@@ -69,7 +69,7 @@ public class KmdbClient {
     // 제목/배우/감독 어디에도 안 걸리는 "좀비", "시간여행" 같은 소재·테마 검색용. KMDB가 영화별로 태깅해둔
     // keywords 필드를 대상으로 찾아줍니다(2026-09-25에 실제 키로 확인: keyword=좀비 -> 킹덤, #살아있다 등).
     public KmdbSearchResponse searchByKeyword(
-            String keyword, String genre, String releaseDts, String releaseDte, int listCount, int startCount, String sort
+            String keyword, String genre, String releaseDts, String releaseDte, Integer listCount, int startCount, String sort
     ) {
         return searchByField("keyword", keyword, genre, releaseDts, releaseDte, listCount, startCount, sort);
     }
@@ -80,19 +80,23 @@ public class KmdbClient {
             String genre,
             String releaseDts,
             String releaseDte,
-            int listCount,
+            Integer listCount,
             int startCount,
             String sort
     ) {
         return call(uriBuilder -> {
-            // 기본 골격은 collection/ServiceKey/detail/startCount/listCount/nation/sort 순으로 고정하고,
-            // 그 위에 이번 조회가 실제로 쓰는 필터(제목·배우·감독, 장르, 개봉일자)만 덧붙입니다.
+            // 기본 골격은 collection/ServiceKey/detail/startCount/nation/sort 순으로 고정하고,
+            // 그 위에 이번 조회가 실제로 쓰는 필터(제목·배우·감독, 장르, 개봉일자, listCount)만 덧붙입니다.
             uriBuilder.queryParam("collection", COLLECTION)
                     .queryParam("ServiceKey", kmdbProperties.serviceKey())
                     .queryParam("detail", "Y")
                     .queryParam("startCount", startCount)
-                    .queryParam("listCount", listCount)
                     .queryParam("nation", DOMESTIC_NATION);
+            // listCount를 생략하면(null) KMDB 자체 기본값으로 응답합니다 - 호출 쪽이 몇 건을 받을지 KMDB에
+            // 직접 지시하지 않고, 받은 응답에서 필요한 만큼만 추려 쓰고 싶을 때 씁니다.
+            if (listCount != null) {
+                uriBuilder.queryParam("listCount", listCount);
+            }
             // 정렬(최신순 -> prodYear,1 / 이름순 -> title,1)도 KMDB가 직접 지원하는 파라미터입니다.
             if (sort != null && !sort.isBlank()) {
                 uriBuilder.queryParam("sort", sort);

@@ -26,7 +26,8 @@ public interface MovieRepository extends JpaRepository<Movie, String> {
                     ELSE 2
                 END,
                 LENGTH(title) ASC,
-                title ASC
+                title ASC,
+                year DESC
             LIMIT :limit
             """, nativeQuery = true)
     List<Object[]> findTitleSuggestionsRaw(@Param("query") String query, @Param("limit") int limit);

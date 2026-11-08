@@ -28,9 +28,11 @@ CREATE TABLE IF NOT EXISTS users (
     CONSTRAINT uq_users_nickname UNIQUE (nickname)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
 
--- 기본 관리자 계정(아이디=admin, 비밀번호=admin1234). password_hash는 BCryptPasswordEncoder로 미리 해시해둔
--- 값이라 앱을 거치지 않고도 이 스키마만으로 계정이 만들어집니다. 이미 있으면(같은 username) 건너뛰므로
--- DB를 새로 만들 때나 이 스크립트를 다시 실행할 때나 항상 존재하고, 로그인 후 바뀐 비밀번호를 덮어쓰지 않습니다.
+-- 기본 관리자 계정. password_hash는 BCryptPasswordEncoder로 미리 해시해둔 값이라 앱을 거치지 않고도
+-- 이 스키마만으로 계정이 만들어집니다. 이미 있으면(같은 username) 건너뛰므로 DB를 새로 만들 때나 이
+-- 스크립트를 다시 실행할 때나 항상 존재하고, 로그인 후 바뀐 비밀번호를 덮어쓰지 않습니다. 계정 정보는
+-- 보안상 평문으로 적어두지 않습니다 - 필요하면 아래 INSERT의 username/password_hash를 원하는 값으로
+-- 직접 바꿔서 쓰세요(password_hash는 BCryptPasswordEncoder로 새로 해시해야 합니다).
 INSERT IGNORE INTO users (username, password_hash, nickname, is_admin)
 VALUES ('admin', '$2a$10$rBUBitlzXedMq2u2Xpofx.zygLzu7lw5unS0UBRuK9CMw/EOJ0AbG', 'Admin', TRUE);
 

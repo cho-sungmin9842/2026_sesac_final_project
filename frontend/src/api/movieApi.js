@@ -104,11 +104,11 @@ export async function getFirstMatches(titles) {
 }
 
 /**
- * 홈 화면 "지금 인기 있는 영화". 고정된 제목 목록이 아니라, 실제 사용자 리뷰 평균 평점이
- * minScore 이상인 영화를 평점순으로 서버에서 직접 조회합니다.
+ * 홈 화면 "지금 인기 있는 영화". 리뷰 유무와 무관하게, 접속 시점(오늘) 이후 개봉(예정)인 작품을
+ * KMDB에서 그대로 조회합니다(KMDB가 응답한 건수를 자르지 않고 전부 받아옵니다).
  */
-export function getPopularMovies(minScore = 4, limit = 6) {
-  return request(`/api/movies/popular?minScore=${minScore}&limit=${limit}`)
+export function getPopularMovies() {
+  return request('/api/movies/popular')
 }
 
 /**

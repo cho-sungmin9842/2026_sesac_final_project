@@ -12,6 +12,15 @@ const GENRE_SEARCH_PAGE_SIZE = 20
 const RECOMMENDED_SECTION_SIZE = 14
 const RECENTLY_VIEWED_SIZE = 14
 
+// "지금 인기 있는 영화" 섹션 제목에 쓸 오늘 날짜(YYYY.MM.DD) - 백엔드가 releaseDts를 접속 시점 날짜로
+// 거르는 것과 같은 기준(오늘)이라는 걸 제목에서도 바로 알 수 있게 합니다.
+function todayLabel() {
+  const today = new Date()
+  const month = String(today.getMonth() + 1).padStart(2, '0')
+  const day = String(today.getDate()).padStart(2, '0')
+  return `${today.getFullYear()}.${month}.${day}`
+}
+
 // 선호 장르가 여러 개면 장르별로 나눠 검색한 뒤 하나로 합치고, 최신 개봉작이 앞에 오도록 정렬합니다.
 // KMDB genre 검색 파라미터는 한 번에 장르 하나만 받기 때문에(부분일치), 장르별로 따로 호출해야 합니다.
 // 선호 장르를 하나도 고르지 않았다면 임의의 기본 장르로 대체하지 않고 그냥 빈 목록을 돌려줍니다.
@@ -110,7 +119,13 @@ function HomePage() {
               viewAllTo="/recently-viewed"
             />
           )}
-          <MovieSection icon="🔥" title="지금 인기 있는 영화" movies={popularMovies} />
+          <MovieSection
+            icon="🔥"
+            title={`오늘(${todayLabel()}) 개봉한 영화`}
+            movies={popularMovies}
+            maxVisible={popularMovies.length}
+            showViewAll={false}
+          />
           {hasPreferredGenres && (
             <MovieSection
               icon="🎯"

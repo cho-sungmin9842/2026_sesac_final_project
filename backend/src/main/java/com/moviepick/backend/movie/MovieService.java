@@ -573,29 +573,26 @@ public class MovieService {
         return summaries;
     }
 
-    // 홈 화면 "지금 인기 있는 영화" - 고정된 영화 제목 목록이 아니라 실제 리뷰 평균 평점이 minScore 이상인 영화를 평점순으로 보여줍니다.
-    public List<MovieSummaryDto> getPopularMovies(double minScore, int limit) {
-        List<TopRatedMovie> topRated = reviewService.getTopRatedMovies(minScore);
-        List<MovieSummaryDto> results = new ArrayList<>();
-
-        for (TopRatedMovie rated : topRated) {
-            if (results.size() >= limit) {
-                break;
-            }
-            String[] parts = rated.movieId().split("_", 2);
-            if (parts.length != 2) {
-                continue;
-            }
-            try {
-                MovieSummaryDto summary = summaryForId(rated.movieId(), parts[0], parts[1], rated.averageScore(), (int) rated.reviewCount());
-                if (summary != null && summary.title() != null && !summary.title().isBlank()) {
-                    results.add(summary);
-                }
-            } catch (Exception ignored) {
-                // KMDB에서 더 이상 찾을 수 없게 된 movieId는 건너뜁니다.
-            }
-        }
-        return results;
+    // 홈 화면 "지금 인기 있는 영화" - 리뷰 평점에 기대면 막 개봉해 아직 리뷰가 없는 신작이 영영 노출되지
+    // 않는 문제가 있어(2026-11-08 확인), 리뷰 유무와 무관하게 KMDB에서 releaseDts=접속 시점 날짜(yyyyMMdd)
+    // 로 "오늘 이후 개봉(예정)"인 작품을 그대로 받아와 보여줍니다. releaseDte 없이 releaseDts만 보내면
+    // KMDB가 그 이후 개봉작만 돌려준다는 걸 실제 키로 확인했고(2026-11-08 기준 31건 - 몇 주 내 개봉작들),
+    // getNowShowing()과 마찬가지로 KMDB 정렬 파라미터는 쓰지 않아 응답 순서 그대로 보여줍니다.
+    public List<MovieSummaryDto> getPopularMovies() {
+        int currentYear = LocalDate.now().getYear();
+        String releaseDts = LocalDate.now().format(KMDB_DATE_FORMAT);
+        // listCount를 생략하면(null) KMDB가 자체 기본값(실측 10건)만 내려줘서 "오늘 이후 개봉작 전부"가
+        // 아니라 일부만 받게 됩니다. 전부 받으려면 넉넉한 값을 직접 지정해야 해서, 다른 검색에서도 쓰는
+        // KMDB 1회 호출 상한(KMDB_MAX_LIST_COUNT)을 그대로 씁니다 - 응답 건수 자체가 적어서(실측 30여건)
+        // 전부 한 번에 받고도 한도에 전혀 걸리지 않습니다.
+        KmdbSearchResponse response = kmdbClient.searchByTitle("", null, releaseDts, null, KMDB_MAX_LIST_COUNT, 0, null);
+        // KMDB가 재개봉/특별상영 등으로 releaseDate를 "0||20260910"처럼 여러 값을 이어 붙여 내려주는 경우가
+        // 있어, releaseDts 필터를 통과했어도 화면에 표시되는 연도(MovieMapper.toYear - 개봉일자 우선, 실패
+        // 시 제작연도로 대체)가 전혀 다른 해(예: 2014)로 나오는 데이터 오류가 섞여 있습니다. "오늘 개봉한
+        // 영화"라는 섹션 제목과 어긋나므로, 화면에 보일 연도가 접속 시점과 같은 해인 항목만 남깁니다.
+        return toRatedSummaries(response.allItems()).stream()
+                .filter(movie -> movie.year() != null && movie.year() == currentYear)
+                .toList();
     }
 
     // 평점순 - 리뷰가 있는 영화를 평점 내림차순으로 먼저 전수 조사해 앞쪽에 배치하고(실제로 몇 안 되므로

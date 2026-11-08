@@ -1,10 +1,12 @@
 package com.moviepick.backend.booking;
 
+import com.moviepick.backend.booking.dto.AdminSeatDto;
 import com.moviepick.backend.booking.dto.BookingTrendPointDto;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
@@ -22,10 +24,22 @@ public class AdminBookingController {
     }
 
     @GetMapping("/trend")
-    public List<BookingTrendPointDto> getDailyTrend(
+    public List<BookingTrendPointDto> getDailyTrend(@RequestHeader("X-User-Id") Long userId) {
+        return bookingService.getDailyTrendForAdmin(userId);
+    }
+
+    // 관리자 "예매/상영관 현황" 좌석 배치도 - 예매 완료 좌석마다 예매자 닉네임을 함께 내려줍니다.
+    @GetMapping("/screenings/{screeningId}/seats")
+    public List<AdminSeatDto> getSeatsForAdmin(
             @RequestHeader("X-User-Id") Long userId,
-            @RequestParam(defaultValue = "14") int days
+            @PathVariable Long screeningId
     ) {
-        return bookingService.getDailyTrendForAdmin(userId, days);
+        return bookingService.getSeatsForAdmin(userId, screeningId);
+    }
+
+    // 관리자 "예매/상영관 현황" 좌석 배치도 - 예매 완료 좌석을 클릭했을 때 그 자리에서 바로 취소합니다.
+    @DeleteMapping("/{bookingId}")
+    public void cancelForAdmin(@RequestHeader("X-User-Id") Long userId, @PathVariable Long bookingId) {
+        bookingService.cancelForAdmin(userId, bookingId);
     }
 }

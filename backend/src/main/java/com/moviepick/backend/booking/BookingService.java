@@ -2,6 +2,7 @@ package com.moviepick.backend.booking;
 
 import com.moviepick.backend.auth.User;
 import com.moviepick.backend.auth.UserRepository;
+import com.moviepick.backend.booking.dto.AdminSeatDto;
 import com.moviepick.backend.booking.dto.BookingDto;
 import com.moviepick.backend.booking.dto.BookingRequest;
 import com.moviepick.backend.booking.dto.BookingTrendPointDto;
@@ -21,6 +22,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -292,24 +294,89 @@ public class BookingService {
         bookingRepository.deleteAll(bookings);
     }
 
-    // 관리자 "예매/상영관 현황" 화면의 기간별 예매 추이 그래프 - 오늘을 포함해 최근 days일간, 날짜별
-    // 실제 예매 건수를 돌려줍니다. 예매가 하나도 없던 날도 0건으로 빠짐없이 채워서 내려줘야 그래프가
-    // 중간에 끊기지 않습니다(Repository의 GROUP BY 결과는 데이터가 있는 날짜만 나옵니다).
-    public List<BookingTrendPointDto> getDailyTrendForAdmin(Long adminUserId, int days) {
+    // 관리자 "예매/상영관 현황" 화면의 기간별 예매 추이 그래프 - 접속 시점 기준 최근 4주(오늘 포함)
+    // 날짜별 실제 예매 건수를 돌려줍니다("당월" 선택 방식에서 다시 고정 창으로 변경 - 2026-11-09.
+    // "지금 상영중인 영화" 드롭다운도 같은 최근 4주 기준이라, 두 영역이 항상 같은 기간을 가리키게 됩니다).
+    // 예매가 하나도 없던 날도 0건으로 빠짐없이 채워서 내려줘야 그래프가 중간에 끊기지 않습니다
+    // (Repository의 GROUP BY 결과는 데이터가 있는 날짜만 나옵니다).
+    public List<BookingTrendPointDto> getDailyTrendForAdmin(Long adminUserId) {
         requireAdminUser(adminUserId);
 
         LocalDate today = LocalDate.now();
-        LocalDate since = today.minusDays(days - 1L);
-        Map<LocalDate, Long> countsByDate = bookingRepository.countDailySince(since.atStartOfDay()).stream()
-                .collect(Collectors.toMap(
-                        row -> toLocalDate(row[0]),
-                        row -> ((Number) row[1]).longValue()));
+        LocalDate since = today.minusWeeks(4);
+        LocalDate until = today;
+
+        // (날짜, 영화제목) 단위로 집계된 원본 행을 날짜별로 다시 묶어서, 그래프에 마우스를 올렸을 때
+        // 보여줄 영화별 내역(byMovie)과 그날 총 건수(count = byMovie 합)를 함께 만듭니다.
+        Map<LocalDate, List<BookingTrendPointDto.MovieBookingCount>> byMoviePerDate =
+                bookingRepository.countDailyByMovieSince(since.atStartOfDay()).stream()
+                        .collect(Collectors.groupingBy(
+                                row -> toLocalDate(row[0]),
+                                Collectors.mapping(
+                                        row -> new BookingTrendPointDto.MovieBookingCount(
+                                                (String) row[1], ((Number) row[2]).longValue(), ((Number) row[3]).longValue()),
+                                        Collectors.toList())));
 
         List<BookingTrendPointDto> trend = new ArrayList<>();
-        for (LocalDate date = since; !date.isAfter(today); date = date.plusDays(1)) {
-            trend.add(new BookingTrendPointDto(date, countsByDate.getOrDefault(date, 0L)));
+        for (LocalDate date = since; !date.isAfter(until); date = date.plusDays(1)) {
+            List<BookingTrendPointDto.MovieBookingCount> byMovie = byMoviePerDate.getOrDefault(date, List.of()).stream()
+                    .sorted(Comparator.comparingLong(BookingTrendPointDto.MovieBookingCount::count).reversed())
+                    .toList();
+            long total = byMovie.stream().mapToLong(BookingTrendPointDto.MovieBookingCount::count).sum();
+            long totalRevenue = byMovie.stream().mapToLong(BookingTrendPointDto.MovieBookingCount::revenue).sum();
+            trend.add(new BookingTrendPointDto(date, total, totalRevenue, byMovie));
         }
         return trend;
+    }
+
+    // 관리자 "예매/상영관 현황" 좌석 배치도 - 일반 사용자용 좌석 조회(ScreeningController.getSeats)와
+    // 달리 예매 완료 좌석마다 예매자 닉네임을 함께 내려줘, 관리자가 좌석을 클릭했을 때 누가 예매했는지
+    // 바로 확인할 수 있게 합니다.
+    public List<AdminSeatDto> getSeatsForAdmin(Long adminUserId, Long screeningId) {
+        requireAdminUser(adminUserId);
+        if (!screeningRepository.existsById(screeningId)) {
+            throw new ApiException("상영정보를 찾을 수 없습니다: " + screeningId, HttpStatus.NOT_FOUND);
+        }
+
+        Map<Long, Booking> bookingBySeatId = bookingRepository.findByScreeningId(screeningId).stream()
+                .flatMap(booking -> booking.getSeats().stream()
+                        .map(bookingSeat -> Map.entry(bookingSeat.getSeatId(), booking)))
+                .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+
+        return seatRepository.findByScreeningIdOrderByRowLabelAscColNoAsc(screeningId).stream()
+                .map(seat -> {
+                    Booking booking = bookingBySeatId.get(seat.getId());
+                    return AdminSeatDto.from(seat,
+                            booking == null ? null : booking.getUser().getNickname(),
+                            booking == null ? null : booking.getUser().getUsername(),
+                            booking == null ? null : booking.getId());
+                })
+                .toList();
+    }
+
+    // 관리자 "예매/상영관 현황" 좌석 배치도 - 고객 문의 대응 등으로 관리자가 직접 예매를 취소합니다.
+    // 일반 사용자 취소(cancel())와 달리 본인 예매인지는 확인하지 않지만(관리자는 누구 예매든 취소
+    // 가능), 상영 임박/종료 마감 제한(validateBookingCutoff)은 똑같이 적용합니다 - 이미 상영이
+    // 시작했거나 끝난 회차를 취소하면 "관람은 이미 끝났는데 예매 기록만 사라지는" 앞뒤가 안 맞는
+    // 상태가 되어서(2026-11-09 수정 - 원래는 관리자라 예외로 뒀었는데, 지난 상영도 취소되는 버그로
+    // 확인되어 되돌림), 여기서도 똑같이 막습니다.
+    @Transactional(noRollbackFor = ApiException.class)
+    public void cancelForAdmin(Long adminUserId, Long bookingId) {
+        requireAdminUser(adminUserId);
+        Booking booking = bookingRepository.findById(bookingId)
+                .orElseThrow(() -> new ApiException("예매 내역을 찾을 수 없습니다: " + bookingId, HttpStatus.NOT_FOUND));
+        Screening screening = screeningRepository.findById(booking.getScreeningId())
+                .orElseThrow(() -> new ApiException("상영정보를 찾을 수 없습니다: " + booking.getScreeningId(), HttpStatus.NOT_FOUND));
+        validateBookingCutoff(screening, "취소");
+
+        Movie movie = movieRepository.findById(screening.getMovieId()).orElse(null);
+        List<Seat> bookingSeats = seatRepository.findAllById(
+                booking.getSeats().stream().map(BookingSeat::getSeatId).toList());
+        BookingDto dto = toDto(booking, screening, bookingSeats, movie);
+
+        releaseSeats(booking);
+        bookingRepository.delete(booking);
+        notificationService.notifyBookingCancelled(booking.getUser(), bookingSummary(dto), dto.totalPrice());
     }
 
     // 네이티브 쿼리의 DATE(created_at) 결과가 드라이버/Hibernate 버전에 따라 java.sql.Date 또는
