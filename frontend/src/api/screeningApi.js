@@ -28,3 +28,13 @@ export function holdSeat(screeningId, seatId, userId) {
 export function releaseSeatHold(screeningId, seatId, userId, keepalive = false) {
   return request(`/api/screenings/${screeningId}/seats/${seatId}/hold`, { method: 'DELETE', userId, keepalive })
 }
+
+// 관리자 "예매/상영관 현황" - 이번 주(월~일) 상영정보가 이미 있는지/개수.
+export function getWeekScreeningStatus(adminUserId) {
+  return request('/api/admin/screenings/week-status', { userId: adminUserId })
+}
+
+// 관리자 수동 생성 - 이번 주 상영정보가 없을 때만 만들고, 이미 있으면 그대로 둡니다.
+export function generateWeekScreenings(adminUserId) {
+  return request('/api/admin/screenings/generate', { method: 'POST', userId: adminUserId })
+}

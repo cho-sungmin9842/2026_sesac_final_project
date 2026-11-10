@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: db-configmap
+  labels:
+    app: moviepick-db
+data:
+  # 기존 이미지(moviepick-db)에 이미 설정되어 있다면 동일한 값이므로 무해합니다.
+  MYSQL_DATABASE: "moviepick"
+  MYSQL_USER: "moviepick"
+  TZ: "Asia/Seoul"

@@ -115,7 +115,9 @@ public class ScreeningGenerationService {
     // 이 메서드는 실행 빈도가 낮고(주 1회 수준) 내부에서 오래 걸리는 외부 I/O(KMDB)가 있어도 다른 요청을
     // 막지 않으므로, 메서드 전체를 잠가도 안전합니다.
     @Scheduled(cron = "0 0 0 * * MON")
-    public synchronized void generateWeeklyScreenings() {
+    // 반환값: 이번에 실제로 새로 생성했으면 true, 이미 이번 주 분량이 있어 건너뛰었으면 false. 스케줄러는
+    // 반환값을 무시하고, 관리자 수동 생성 API(AdminScreeningController)가 결과 안내에 사용합니다.
+    public synchronized boolean generateWeeklyScreenings() {
         // cron이 정확히 월요일 자정에만 돌긴 하지만, 재실행/수동 트리거 시에도 항상 "이번 주 월요일"을
         // 정확히 앵커링해둡니다(그래야 날짜 계산이 실제 호출 요일에 좌우되지 않습니다).
         LocalDate monday = LocalDate.now().with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
@@ -123,7 +125,7 @@ public class ScreeningGenerationService {
 
         // 이미 이번 주(월~일) 상영정보가 있으면 재생성하지 않습니다.
         if (screeningRepository.existsByDateBetween(monday, sunday)) {
-            return;
+            return false;
         }
 
         List<Theater> theaters = theaterRepository.findAllByOrderByIdAsc();
@@ -143,6 +145,7 @@ public class ScreeningGenerationService {
         }
 
         writeScreeningReport(monday, sunday);
+        return true;
     }
 
     // 방금 새로 생성한 한 주치 상영정보를 사람이 바로 훑어보기 좋은 형식으로 파일에 남겨둡니다(영화별로

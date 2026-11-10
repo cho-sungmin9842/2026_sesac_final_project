@@ -38,7 +38,15 @@ function Header() {
   const [menuOpen, setMenuOpen] = useState(false)
   const [suggestions, setSuggestions] = useState([])
   const [showSuggestions, setShowSuggestions] = useState(false)
+  // 방향키(↑/↓)로 하이라이트한 자동완성 항목 번호 - -1이면 아무것도 고르지 않은 상태(Enter는 일반 검색).
+  const [activeIndex, setActiveIndex] = useState(-1)
   const suggestionRequestId = useRef(0)
+  // 방향키/후보 클릭으로 입력창 글자가 프로그램에 의해 바뀌면, 이걸 "새 입력"으로 착각해 후보를 다시
+  // 불러오지 않도록 그 글자를 기억해둡니다(글자가 같을 때만 건너뜀 - 같은 값으로 바꾼 경우에도 건너뛰기
+  // 표시가 남아 다음 입력을 씹는 일이 없도록 불리언 대신 값 비교를 씁니다). typedText는 사용자가 직접 친
+  // 글자(Esc로 되돌릴 때 사용).
+  const programmaticText = useRef(null)
+  const typedText = useRef('')
   const selectedSearchType = SEARCH_TYPES.find((type) => type.value === searchType) ?? SEARCH_TYPES[0]
 
   // Header는 라우트가 바뀌어도 다시 마운트되지 않아서(레이아웃에 고정), 검색 결과 화면(/movies)을 벗어나면
@@ -57,7 +65,17 @@ function Header() {
   // 입력 중일 때마다 바로 요청하지 않고(타이핑할 때마다 서버를 때리는 걸 막기 위해) 잠깐 멈췄을
   // 때만 자동완성을 불러옵니다. 응답이 늦게 와서 이미 다른 글자를 입력한 뒤 도착하는 경우(요청
   // 순서가 뒤바뀌는 경우)를 대비해, 매 요청에 번호를 매겨 가장 최근 요청의 응답만 반영합니다.
+  // 후보 목록이 바뀌거나(새 입력/유형 변경) 닫히면 하이라이트를 초기화합니다.
   useEffect(() => {
+    setActiveIndex(-1)
+  }, [suggestions, showSuggestions])
+
+  useEffect(() => {
+    if (programmaticText.current !== null && programmaticText.current === searchText) {
+      // 이미 날아간 이전 요청의 응답이 뒤늦게 목록을 덮어쓰지 못하게 요청 번호도 올려둡니다.
+      suggestionRequestId.current += 1
+      return undefined
+    }
     if (!searchText.trim() || !AUTOCOMPLETE_FIELDS.has(searchType)) {
       setSuggestions([])
       return undefined
@@ -100,8 +118,43 @@ function Header() {
       navigate(`/movies/${encodeURIComponent(suggestion.id)}`)
       return
     }
+    programmaticText.current = suggestion
+    typedText.current = suggestion
     setSearchText(suggestion)
     navigate(`/movies?query=${encodeURIComponent(suggestion)}&field=${searchType}`)
+  }
+
+  // ↓/↑로 후보를 오가고(끝에서 순환), 하이라이트된 상태의 Enter는 그 후보를 선택합니다.
+  const handleSearchKeyDown = (event) => {
+    const listOpen = showSuggestions && suggestions.length > 0
+    if (event.key === 'Escape') {
+      setShowSuggestions(false)
+      if (activeIndex >= 0) {
+        programmaticText.current = typedText.current
+        setSearchText(typedText.current)
+      }
+    } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      if (suggestions.length === 0) return
+      event.preventDefault()
+      if (!listOpen) {
+        setShowSuggestions(true)
+        return
+      }
+      const last = suggestions.length - 1
+      const next =
+        event.key === 'ArrowDown'
+          ? activeIndex >= last ? 0 : activeIndex + 1
+          : activeIndex <= 0 ? last : activeIndex - 1
+      setActiveIndex(next)
+      // 검색창에도 하이라이트된 후보의 글자를 바로 보여줍니다.
+      const picked = suggestions[next]
+      const pickedText = searchType === 'title' ? picked.title : picked
+      programmaticText.current = pickedText
+      setSearchText(pickedText)
+    } else if (event.key === 'Enter' && listOpen && activeIndex >= 0) {
+      event.preventDefault()
+      handleSuggestionClick(suggestions[activeIndex])
+    }
   }
 
   const searchForm = (
@@ -123,28 +176,46 @@ function Header() {
           name="query"
           type="text"
           value={searchText}
-          onChange={(event) => setSearchText(event.target.value)}
+          onChange={(event) => {
+            typedText.current = event.target.value
+            programmaticText.current = null
+            setSearchText(event.target.value)
+          }}
           onFocus={() => suggestions.length > 0 && setShowSuggestions(true)}
           // 드롭다운 항목 클릭(mousedown)이 이 blur보다 먼저 일어나도록 click 대신 onMouseDown에서
           // 처리하므로, 여기서 바로 닫아도 클릭이 씹히지 않습니다.
           onBlur={() => setShowSuggestions(false)}
-          onKeyDown={(event) => event.key === 'Escape' && setShowSuggestions(false)}
+          onKeyDown={handleSearchKeyDown}
+          role="combobox"
+          aria-expanded={showSuggestions && suggestions.length > 0}
+          aria-autocomplete="list"
           autoComplete="off"
           placeholder={`${selectedSearchType.label}${selectedSearchType.particle} 입력해주세요`}
           className="w-full bg-transparent text-gray-100 placeholder:text-gray-500 focus:outline-none"
         />
 
         {showSuggestions && suggestions.length > 0 && (
-          <ul className="absolute left-0 right-0 top-full z-30 mt-2 overflow-hidden rounded-lg border border-white/10 bg-slate-900 shadow-lg">
-            {suggestions.map((suggestion) => (
-              <li key={searchType === 'title' ? suggestion.id : suggestion}>
+          <ul
+            role="listbox"
+            className="absolute left-0 right-0 top-full z-30 mt-2 overflow-hidden rounded-lg border border-white/10 bg-slate-900 shadow-lg"
+          >
+            {suggestions.map((suggestion, index) => (
+              <li
+                key={searchType === 'title' ? suggestion.id : suggestion}
+                role="option"
+                aria-selected={index === activeIndex}
+              >
                 <button
                   type="button"
+                  tabIndex={-1}
+                  onMouseEnter={() => setActiveIndex(index)}
                   onMouseDown={(event) => {
                     event.preventDefault()
                     handleSuggestionClick(suggestion)
                   }}
-                  className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm text-gray-200 hover:bg-slate-800"
+                  className={`flex w-full items-center gap-3 px-3 py-2 text-left text-sm text-gray-200 hover:bg-slate-800 ${
+                    index === activeIndex ? 'bg-slate-800' : ''
+                  }`}
                 >
                   {searchType === 'title' ? (
                     <>

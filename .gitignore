@@ -4,3 +4,6 @@ tools/
 
 # docker-compose.yml 이 읽는 루트 .env (DB 비밀번호, KMDB/Gemini 키가 들어가므로 git 에 올리지 않습니다. 템플릿은 .env.example)
 /.env
+
+# 쿠버네티스 Secret 매니페스트에는 DB 비밀번호/KMDB/Gemini 키가 들어가므로 git 에 올리지 않습니다. 템플릿은 k8s/*-secret.example.yaml
+/k8s/*-secret.yaml

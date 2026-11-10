@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useAuth } from '../../auth/AuthContext'
-import { getScreenings } from '../../api/screeningApi'
+import { getScreenings, getWeekScreeningStatus, generateWeekScreenings } from '../../api/screeningApi'
 import { getNowShowing } from '../../api/movieApi'
 import { getBookingTrend, getAdminScreeningSeats, cancelBookingForAdmin } from '../../api/bookingApi'
 import StatCard from './components/StatCard'
@@ -30,6 +30,22 @@ function AdminScreeningsPage() {
   const [occupancyStatus, setOccupancyStatus] = useState('idle') // idle | loading | ready | error
   const [selectedScreeningId, setSelectedScreeningId] = useState(null)
   const [cancelErrorMessage, setCancelErrorMessage] = useState('')
+  // 이번 주(월~일) 상영정보 존재 여부 - 자동 생성이 안 돌았을 때 관리자가 수동으로 만들 수 있게 합니다.
+  const [weekStatus, setWeekStatus] = useState(null) // { weekStart, weekEnd, exists, count } | null(확인 전/실패)
+  const [generating, setGenerating] = useState(false)
+  const [generateResult, setGenerateResult] = useState(null) // { title, message, tone }
+
+  useEffect(() => {
+    let cancelled = false
+    getWeekScreeningStatus(user.id)
+      .then((status) => {
+        if (!cancelled) setWeekStatus(status)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [user.id])
 
   useEffect(() => {
     let cancelled = false
@@ -165,6 +181,27 @@ function AdminScreeningsPage() {
       })
   }
 
+  // 생성이 끝나면(서버가 KMDB를 조회해서 시간이 걸릴 수 있음) 영화/상영 목록을 새로 받도록 페이지를
+  // 다시 불러옵니다 - 가장 단순하고 확실하게 모든 선택지를 최신 상태로 맞춥니다.
+  const handleGenerateWeek = () => {
+    if (generating) return
+    setGenerating(true)
+    generateWeekScreenings(user.id)
+      .then((result) => {
+        setWeekStatus(result.status)
+        setGenerateResult({
+          title: result.generated ? '상영정보 생성 완료' : '생성할 필요 없음',
+          message: result.message,
+          tone: 'success',
+          reload: result.generated,
+        })
+      })
+      .catch((error) => {
+        setGenerateResult({ title: '상영정보 생성 실패', message: error.message, tone: 'error', reload: false })
+      })
+      .finally(() => setGenerating(false))
+  }
+
   const handleCancelBooking = (bookingId) =>
     cancelBookingForAdmin(user.id, bookingId)
       .then(() => {
@@ -185,6 +222,31 @@ function AdminScreeningsPage() {
       <p className="mt-1 text-sm text-gray-400">
         일자별로 상영 영화와 상영관을 선택하면 회차별 예매 현황을 볼 수 있습니다.
       </p>
+
+      {weekStatus && !weekStatus.exists && (
+        <div
+          role="alert"
+          className="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-500/40 bg-amber-500/10 p-4"
+        >
+          <div>
+            <p className="text-sm font-semibold text-amber-300">
+              이번 주({weekStatus.weekStart} ~ {weekStatus.weekEnd}) 상영정보가 아직 생성되지 않았습니다.
+            </p>
+            <p className="mt-1 text-xs text-gray-400">
+              자동 생성(매주 월요일 자정)이 실행되지 않았다면 아래 버튼으로 직접 생성할 수 있습니다. 생성에는 수 초에서
+              수십 초가 걸릴 수 있습니다.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={handleGenerateWeek}
+            disabled={generating}
+            className="rounded-lg bg-amber-500 px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-amber-400 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {generating ? '생성 중...' : '이번 주 상영정보 생성'}
+          </button>
+        </div>
+      )}
 
       <div className="mt-6 rounded-xl bg-slate-900/60 p-4">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -329,6 +391,19 @@ function AdminScreeningsPage() {
               </div>
             ))}
         </div>
+      )}
+
+      {generateResult && (
+        <InfoDialog
+          title={generateResult.title}
+          message={generateResult.message}
+          tone={generateResult.tone}
+          onClose={() => {
+            const shouldReload = generateResult.reload
+            setGenerateResult(null)
+            if (shouldReload) window.location.reload()
+          }}
+        />
       )}
 
       {cancelErrorMessage && (

@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: front-configmap
+  labels:
+    app: moviepick-frontend
+data:
+  API_UPSTREAM: "http://backend:8080"

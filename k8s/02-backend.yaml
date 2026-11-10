@@ -1,0 +1,52 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  labels:
+    app: moviepick-backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: moviepick-backend
+  template:
+    metadata:
+      labels:
+        app: moviepick-backend
+    spec:
+      imagePullSecrets:
+        - name: dockerhub-secret
+      containers:
+        - name: backend
+          image: sungmin9842/moviepick-backend:1.0
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: backend-configmap
+            - secretRef:
+                name: backend-secret
+          readinessProbe:
+            tcpSocket:
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 8080
+            initialDelaySeconds: 90
+            periodSeconds: 20
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend
+  labels:
+    app: moviepick-backend
+spec:
+  type: ClusterIP
+  selector:
+    app: moviepick-backend
+  ports:
+    - port: 8080
+      targetPort: 8080
