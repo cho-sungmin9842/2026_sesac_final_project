@@ -5,4 +5,4 @@ metadata:
   labels:
     app: moviepick-frontend
 data:
-  API_UPSTREAM: "http://backend:8080"
+  API_UPSTREAM: "http://backend.default.svc.cluster.local:8080"

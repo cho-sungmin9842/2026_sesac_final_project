@@ -8,5 +8,5 @@ data:
   DB_USERNAME: "moviepick"
   SPRING_DATASOURCE_USERNAME: "moviepick"
   SPRING_DATASOURCE_URL: "jdbc:mysql://db:3306/moviepick?allowPublicKeyRetrieval=true&useSSL=false&serverTimezone=Asia/Seoul&characterEncoding=UTF-8"
-  APP_CORS_ALLOWED_ORIGINS: "https://smcho.store"
+  APP_CORS_ALLOWED_ORIGINS: "https://smcho.store,http://localhost:30100"
   SERVER_FORWARD_HEADERS_STRATEGY: "framework"
