@@ -52,6 +52,12 @@ public class AuthService {
         User user = userRepository.findByUsername(username)
                 .filter(candidate -> passwordEncoder.matches(request.password(), candidate.getPasswordHash()))
                 .orElseThrow(() -> new ApiException("아이디 또는 비밀번호가 올바르지 않습니다.", HttpStatus.UNAUTHORIZED));
+        // 아이디/비밀번호가 맞는지부터 확인한 뒤에 정지 여부를 봐야, 정지된 계정인지 아닌지가 틀린
+        // 비밀번호 시도만으로 드러나지 않습니다. 관리자가 고른 정지 사유를 함께 안내합니다(메시지는
+        // UserService.buildSuspendedMessage로 통일 - 세션 유효성 재확인(/api/users/me)도 같은 문구).
+        if (user.isSuspended()) {
+            throw new ApiException(UserService.buildSuspendedMessage(user), HttpStatus.FORBIDDEN);
+        }
         return UserDto.from(user);
     }
 

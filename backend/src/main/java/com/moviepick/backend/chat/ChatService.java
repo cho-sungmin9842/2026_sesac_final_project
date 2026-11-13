@@ -588,7 +588,7 @@ public class ChatService {
             return java.util.Optional.empty();
         }
         List<MovieSummaryDto> candidates =
-                movieService.search(movieTitle, List.of(), null, null, null, "latest", 1, EXACT_TITLE_SEARCH_POOL, "title").movies();
+                movieService.search(movieTitle, List.of(), null, null, null, "latest", 1, EXACT_TITLE_SEARCH_POOL, "title", false).movies();
         return candidates.stream().filter(movie -> titleMatches(movie.title(), movieTitle)).findFirst();
     }
 
@@ -1376,7 +1376,7 @@ public class ChatService {
                 movies = searchNonEmpty(filter.query(), genres, filter.year(), "director", searchPageSize);
             }
         } else {
-            movies = movieService.search("", genres, filter.year(), null, null, "latest", 1, searchPageSize, "title").movies();
+            movies = movieService.search("", genres, filter.year(), null, null, "latest", 1, searchPageSize, "title", false).movies();
         }
 
         return movies.stream()
@@ -1421,7 +1421,7 @@ public class ChatService {
     }
 
     private List<MovieSummaryDto> searchNonEmpty(String query, List<String> genres, String year, String field, int pageSize) {
-        return movieService.search(query, genres, year, null, null, "latest", 1, pageSize, field).movies();
+        return movieService.search(query, genres, year, null, null, "latest", 1, pageSize, field, false).movies();
     }
 
     // "범죄도시 추천해줘"처럼 영화 제목으로 추천을 요청하면, movie_question/pricing_info 등 다른 intent와
@@ -1434,7 +1434,7 @@ public class ChatService {
     // "latest" 정렬상 정확히 같은 제목의 영화가 뒤쪽에 있어도 놓치지 않습니다.
     private List<MovieSummaryDto> exactTitleSearch(String referenceTitle, List<String> genres, String year) {
         List<MovieSummaryDto> candidates =
-                movieService.search(referenceTitle, genres, year, null, null, "latest", 1, EXACT_TITLE_SEARCH_POOL, "title").movies();
+                movieService.search(referenceTitle, genres, year, null, null, "latest", 1, EXACT_TITLE_SEARCH_POOL, "title", false).movies();
         return candidates.stream().filter(movie -> titleMatches(movie.title(), referenceTitle)).toList();
     }
 

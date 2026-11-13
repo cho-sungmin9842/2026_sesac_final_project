@@ -1,6 +1,7 @@
 package com.moviepick.backend.review;
 
 import com.moviepick.backend.review.dto.ReviewDto;
+import com.moviepick.backend.review.dto.ReviewReportRequest;
 import com.moviepick.backend.review.dto.ReviewRequest;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -56,5 +57,18 @@ public class ReviewController {
             @RequestHeader("X-User-Id") Long userId
     ) {
         reviewService.delete(movieId, reviewId, userId);
+    }
+
+    /**
+     * 본인이 작성하지 않은 리뷰를 신고합니다 - ReviewList.jsx의 "신고" 버튼용.
+     */
+    @PostMapping("/{reviewId}/report")
+    public void report(
+            @PathVariable String movieId,
+            @PathVariable Long reviewId,
+            @RequestHeader("X-User-Id") Long userId,
+            @RequestBody ReviewReportRequest request
+    ) {
+        reviewService.reportReview(movieId, reviewId, userId, request.reason());
     }
 }

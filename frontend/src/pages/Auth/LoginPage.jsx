@@ -3,7 +3,14 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../auth/AuthContext'
 import AuthShell from './components/AuthShell'
 import FindPasswordDialog from './components/FindPasswordDialog'
+import InfoDialog from '../../components/common/InfoDialog'
 import { josa } from '../../utils/korean'
+
+// UserService.SUSPENDED_MESSAGE_PREFIX와 반드시 같아야 합니다 - 이 문구가 포함돼 있을 때만 다른
+// 로그인 실패(아이디/비밀번호 오류 등)와 달리 인라인 경고 대신 다이얼로그로 보여줍니다(더 눈에 띄게
+// 안내하기 위함). 정지 사유가 있으면 이 문구보다 앞에 붙어서 위치가 바뀌므로, startsWith가 아니라
+// includes로 비교합니다.
+const SUSPENDED_MESSAGE_PREFIX = '이용이 정지된 사용자입니다.'
 
 function LoginPage() {
   const { login } = useAuth()
@@ -12,6 +19,7 @@ function LoginPage() {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
+  const [suspendedMessage, setSuspendedMessage] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [showFindPassword, setShowFindPassword] = useState(false)
 
@@ -43,7 +51,11 @@ function LoginPage() {
     try {
       goAfterLogin(await login(username, password))
     } catch (err) {
-      setError(err.message)
+      if (err.message.includes(SUSPENDED_MESSAGE_PREFIX)) {
+        setSuspendedMessage(err.message)
+      } else {
+        setError(err.message)
+      }
     } finally {
       setIsSubmitting(false)
     }
@@ -123,6 +135,10 @@ function LoginPage() {
 
       {showFindPassword && (
         <FindPasswordDialog onClose={() => setShowFindPassword(false)} onAutoLogin={goAfterLogin} />
+      )}
+
+      {suspendedMessage && (
+        <InfoDialog title="로그인 불가" message={suspendedMessage} tone="error" onClose={() => setSuspendedMessage('')} />
       )}
     </AuthShell>
   )

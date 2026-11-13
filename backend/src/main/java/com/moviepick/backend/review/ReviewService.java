@@ -4,10 +4,12 @@ import com.moviepick.backend.auth.User;
 import com.moviepick.backend.auth.UserRepository;
 import com.moviepick.backend.common.ApiException;
 import com.moviepick.backend.movie.MovieTitleResolver;
+import com.moviepick.backend.notification.NotificationService;
 import com.moviepick.backend.review.dto.ReviewDto;
 import com.moviepick.backend.review.dto.ReviewRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Collection;
 import java.util.List;
@@ -18,15 +20,23 @@ import java.util.stream.Collectors;
 public class ReviewService {
 
     private final ReviewRepository reviewRepository;
+    private final ReviewReportRepository reviewReportRepository;
     private final UserRepository userRepository;
     private final MovieTitleResolver movieTitleResolver;
+    private final NotificationService notificationService;
 
     public ReviewService(
-            ReviewRepository reviewRepository, UserRepository userRepository, MovieTitleResolver movieTitleResolver
+            ReviewRepository reviewRepository,
+            ReviewReportRepository reviewReportRepository,
+            UserRepository userRepository,
+            MovieTitleResolver movieTitleResolver,
+            NotificationService notificationService
     ) {
         this.reviewRepository = reviewRepository;
+        this.reviewReportRepository = reviewReportRepository;
         this.userRepository = userRepository;
         this.movieTitleResolver = movieTitleResolver;
+        this.notificationService = notificationService;
     }
 
     public List<ReviewDto> list(String movieId) {
@@ -84,6 +94,26 @@ public class ReviewService {
     public void delete(String movieId, Long reviewId, Long userId) {
         Review review = requireOwnedReview(movieId, reviewId, userId);
         reviewRepository.delete(review);
+    }
+
+    // 리뷰 목록의 "신고" 버튼 - 본인 리뷰는 신고할 수 없고(작성자가 직접 "수정/삭제"로 처리하면 됨),
+    // 같은 사람이 같은 리뷰를 두 번 신고할 수 없습니다. 신고가 접수되면 관리자 전원에게 알립니다
+    // (NotificationService의 "전체 관리자에게 알림" 패턴 재사용 - 예매 완료/취소 알림과 동일).
+    @Transactional
+    public void reportReview(String movieId, Long reviewId, Long reporterUserId, String reasonCode) {
+        User reporter = requireUser(reporterUserId);
+        Review review = reviewRepository.findById(reviewId)
+                .filter(candidate -> candidate.getMovieId().equals(movieId))
+                .orElseThrow(() -> new ApiException("리뷰를 찾을 수 없습니다.", HttpStatus.NOT_FOUND));
+        if (review.getUser().getId().equals(reporterUserId)) {
+            throw new ApiException("본인이 작성한 리뷰는 신고할 수 없습니다.", HttpStatus.BAD_REQUEST);
+        }
+        if (reviewReportRepository.existsByReviewIdAndReporterId(reviewId, reporterUserId)) {
+            throw new ApiException("이미 신고한 리뷰입니다.", HttpStatus.CONFLICT);
+        }
+        ReviewReportReason reason = ReviewReportReason.fromCode(reasonCode);
+        reviewReportRepository.save(new ReviewReport(review, reporter, reason.name()));
+        notificationService.notifyReviewReported(reporter, review, reason.label());
     }
 
     // 영화 목록/검색 결과에 붙일 평균 평점을 movieId별로 한 번에 모아서 돌려줍니다(N+1 방지).

@@ -19,7 +19,11 @@ export default async function request(path, { method = 'GET', body, userId, keep
 
   if (!response.ok) {
     const errorBody = await response.json().catch(() => null)
-    throw new Error(errorBody?.message ?? `요청이 실패했습니다 (status ${response.status})`)
+    const error = new Error(errorBody?.message ?? `요청이 실패했습니다 (status ${response.status})`)
+    // 세션 유효성 재확인(checkSession)처럼, 실패 원인이 "인증 자체가 무효해졌는지"(401/403)와
+    // "일시적인 다른 오류"인지 구분해야 하는 호출에서 씁니다.
+    error.status = response.status
+    throw error
   }
 
   if (response.status === 204) return null

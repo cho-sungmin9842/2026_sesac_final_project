@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useAuth } from '../../auth/AuthContext'
 import {
   getNotifications,
@@ -110,22 +111,52 @@ function NotificationBell() {
             {notifications.length === 0 && (
               <p className="px-4 py-6 text-center text-sm text-gray-500">알림이 없습니다.</p>
             )}
-            {notifications.map((notification) => (
-              <button
-                key={notification.id}
-                type="button"
-                onClick={() => handleNotificationClick(notification)}
-                className={`block w-full border-b border-white/5 px-4 py-3 text-left text-sm last:border-0 hover:bg-slate-800 ${
-                  notification.read ? 'text-gray-400' : 'text-gray-100'
-                }`}
-              >
-                <p className="leading-relaxed">{notification.message}</p>
-                <p className="mt-1 flex items-center gap-1.5 text-xs text-gray-500">
-                  {!notification.read && <span className="h-1.5 w-1.5 rounded-full bg-indigo-500" />}
-                  {formatRelative(notification.createdAt)}
-                </p>
-              </button>
-            ))}
+            {notifications.map((notification) => {
+              const itemClassName = `block w-full border-b border-white/5 px-4 py-3 text-left text-sm last:border-0 hover:bg-slate-800 ${
+                notification.read ? 'text-gray-400' : 'text-gray-100'
+              }`
+              const itemContent = (
+                <>
+                  <p className="leading-relaxed">{notification.message}</p>
+                  <p className="mt-1 flex items-center gap-1.5 text-xs text-gray-500">
+                    {!notification.read && <span className="h-1.5 w-1.5 rounded-full bg-indigo-500" />}
+                    {formatRelative(notification.createdAt)}
+                    {/* bookingId가 있는(예매 생성/임박/좌석변경) 알림만 "보러가기"로 연결합니다.
+                        관리자는 마이페이지 접근 권한이 없어(RequireAuth) 이동 대상이 없으므로 제외합니다. */}
+                    {notification.bookingId && !user.isAdmin && (
+                      <span className="ml-auto font-semibold text-indigo-400">보러가기 →</span>
+                    )}
+                  </p>
+                </>
+              )
+
+              if (notification.bookingId && !user.isAdmin) {
+                return (
+                  <Link
+                    key={notification.id}
+                    to="/mypage"
+                    onClick={() => {
+                      setOpen(false)
+                      handleNotificationClick(notification)
+                    }}
+                    className={itemClassName}
+                  >
+                    {itemContent}
+                  </Link>
+                )
+              }
+
+              return (
+                <button
+                  key={notification.id}
+                  type="button"
+                  onClick={() => handleNotificationClick(notification)}
+                  className={itemClassName}
+                >
+                  {itemContent}
+                </button>
+              )
+            })}
           </div>
         </div>
       )}

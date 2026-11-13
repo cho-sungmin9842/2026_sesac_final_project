@@ -48,7 +48,7 @@ const AGE_RATING_PARAM_MAP = {
  * sort(latest/name)는 KMDB에 정렬 파라미터가 없어서 백엔드가 여러 페이지 분량을 미리 받아와 직접 정렬합니다.
  * 응답은 { movies, page, pageSize, totalCount, totalPages } 형태입니다.
  */
-export function searchMovies(query, { genre, year, runtime, ageRating, sort, page = 1, pageSize = 20, field } = {}) {
+export function searchMovies(query, { genre, year, runtime, ageRating, sort, page = 1, pageSize = 20, field, hideIncomplete } = {}) {
   const params = new URLSearchParams({ query, page, pageSize })
   const genreList = Array.isArray(genre) ? genre.filter(Boolean) : [genre].filter(Boolean)
   genreList.forEach((value) => params.append('genre', toKmdbGenreParam(value)))
@@ -57,6 +57,9 @@ export function searchMovies(query, { genre, year, runtime, ageRating, sort, pag
   if (ageRating && AGE_RATING_PARAM_MAP[ageRating]) params.set('ageRating', AGE_RATING_PARAM_MAP[ageRating])
   if (sort) params.set('sort', sort)
   if (field) params.set('field', field)
+  // 포스터/관람등급 정보가 없는 영화를 서버에서 미리 걸러내고, 그만큼 더 받아와 한 페이지를 꽉 채웁니다
+  // (프론트에서 받은 뒤 걸러내면 그 페이지가 빈 자리투성이가 됩니다 - 2026-11-12 실측).
+  if (hideIncomplete) params.set('hideIncomplete', 'true')
   return request(`/api/movies?${params.toString()}`)
 }
 

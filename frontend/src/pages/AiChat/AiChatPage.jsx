@@ -67,6 +67,9 @@ function AiChatPage() {
   const [pendingDeleteConversationId, setPendingDeleteConversationId] = useState(null)
   const [deleteErrorMessage, setDeleteErrorMessage] = useState('')
   const [isListening, setIsListening] = useState(false)
+  // 대화 기록 사이드바는 sm(640px) 미만에서 기본적으로 숨겨진 오버레이입니다(AdminSidebar와 같은 패턴) -
+  // 이 버튼으로 열고 닫습니다.
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false)
   const nextId = useRef(1)
   const bottomRef = useRef(null)
   const inputRef = useRef(null)
@@ -295,11 +298,23 @@ function AiChatPage() {
         onSelect={handleSelectConversation}
         onDelete={handleDeleteConversation}
         isLoading={isLoadingConversations}
+        open={isSidebarOpen}
+        onClose={() => setIsSidebarOpen(false)}
       />
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <div className="mb-3 flex items-center justify-between">
-          <h1 className="text-lg font-bold text-gray-100">AI 챗봇</h1>
+        <div className="mb-3 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setIsSidebarOpen(true)}
+              className="rounded-lg border border-gray-700 px-2.5 py-1.5 text-sm text-gray-300 hover:bg-slate-800 sm:hidden"
+              aria-label="대화 기록 열기"
+            >
+              ☰
+            </button>
+            <h1 className="text-lg font-bold text-gray-100">AI 챗봇</h1>
+          </div>
           <button
             type="button"
             onClick={handleNewConversation}

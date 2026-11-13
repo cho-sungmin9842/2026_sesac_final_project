@@ -27,6 +27,15 @@ export function deleteReview(movieId, reviewId, userId) {
   })
 }
 
+// 본인이 작성하지 않은 리뷰 신고 - reason은 reviewReportReasons.js의 key 중 하나입니다.
+export function reportReview(movieId, reviewId, userId, reason) {
+  return request(`/api/movies/${encodeURIComponent(movieId)}/reviews/${reviewId}/report`, {
+    method: 'POST',
+    userId,
+    body: { reason },
+  })
+}
+
 // 마이페이지 "내가 쓴 리뷰" 탭 - 영화 구분 없이 이 사용자가 쓴 모든 리뷰.
 export function getMyReviews(userId) {
   return request('/api/reviews/mine', { userId })

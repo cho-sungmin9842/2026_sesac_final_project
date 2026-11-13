@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import HorizontalScroll from '../../../components/common/HorizontalScroll'
 
 // 왼쪽/가운데/오른쪽 세 블록으로 나눠서 표시합니다(사진처럼 통로로 구분된 모양). 좌/우 블록은 3열씩,
 // 가운데 블록이 나머지를 전부 가져갑니다(열 수가 바뀌어도 똑같은 비율로 동작합니다).
@@ -40,7 +41,8 @@ function SeatMap({ seats, selectedSeats, onToggleSeat }) {
         <span className="text-sm font-bold tracking-[0.4em] text-[#ffffff]">SCREEN</span>
       </div>
 
-      <div className="flex flex-col items-center gap-1.5">
+      <HorizontalScroll>
+      <div className="mx-auto flex w-max flex-col items-center gap-1.5">
         <div className="flex items-center gap-1.5">
           <span className="w-4" />
           {Array.from({ length: colCount }, (_, i) => i + 1).map((colNo) => {
@@ -83,6 +85,7 @@ function SeatMap({ seats, selectedSeats, onToggleSeat }) {
           </div>
         ))}
       </div>
+      </HorizontalScroll>
 
       <div className="mt-6 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-xs text-gray-400">
         <span className="flex items-center gap-1.5">

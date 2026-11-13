@@ -23,6 +23,14 @@ CREATE TABLE IF NOT EXISTS users (
     password_hash VARCHAR(255) NOT NULL,
     nickname      VARCHAR(100) NOT NULL,
     is_admin      BOOLEAN      NOT NULL DEFAULT FALSE,
+    -- 관리자 "회원 관리" 화면의 정지 조치. 정지된 계정은 로그인만 막히고(AuthService.login),
+    -- 데이터는 그대로 남아있어 정지 해제하면 다시 예전처럼 쓸 수 있습니다.
+    is_suspended  BOOLEAN      NOT NULL DEFAULT FALSE,
+    -- 정지 사유(백엔드 SuspensionReason enum의 name()) - 정지할 때만 값이 들어가고, 해제하면 NULL로 비웁니다.
+    suspension_reason VARCHAR(50) NULL,
+    -- 관리자 "회원 관리" 화면의 온라인/오프라인 표시용 - 인증된 API 요청(X-User-Id 헤더)이 올 때마다
+    -- UserActivityInterceptor가 갱신합니다. NULL이면 한 번도 활동이 감지되지 않은 것(오프라인)입니다.
+    last_active_at DATETIME   NULL,
     created_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT uq_users_username UNIQUE (username),
     CONSTRAINT uq_users_nickname UNIQUE (nickname)
@@ -59,6 +67,21 @@ CREATE TABLE IF NOT EXISTS reviews (
     CONSTRAINT fk_reviews_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
     CONSTRAINT chk_reviews_score CHECK (score BETWEEN 1 AND 5),
     INDEX idx_reviews_movie_id (movie_id)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
+
+-- 리뷰 신고 - 본인이 작성한 리뷰가 아닌 다른 사용자의 리뷰만 신고할 수 있고(ReviewService에서 검증),
+-- 같은 사람이 같은 리뷰를 중복 신고하지 못하게 (review_id, reporter_user_id)를 유니크로 둡니다.
+-- 신고된 리뷰가 삭제되면(관리자 삭제든 작성자 본인 삭제든) 신고 기록도 같이 지웁니다(ON DELETE CASCADE).
+CREATE TABLE IF NOT EXISTS review_reports (
+    id               BIGINT AUTO_INCREMENT PRIMARY KEY,
+    review_id        BIGINT      NOT NULL,
+    reporter_user_id BIGINT      NOT NULL,
+    -- 백엔드 ReviewReportReason enum의 name()(예: ABUSIVE_LANGUAGE).
+    reason           VARCHAR(50) NOT NULL,
+    created_at       DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_review_reports_review FOREIGN KEY (review_id) REFERENCES reviews (id) ON DELETE CASCADE,
+    CONSTRAINT fk_review_reports_reporter FOREIGN KEY (reporter_user_id) REFERENCES users (id) ON DELETE CASCADE,
+    CONSTRAINT uq_review_reports_review_reporter UNIQUE (review_id, reporter_user_id)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
 
 -- 마이페이지 "찜한 영화" 통계/탭.

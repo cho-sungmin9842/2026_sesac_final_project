@@ -7,6 +7,7 @@ import { createBooking } from '../../api/bookingApi'
 import PosterPlaceholder from '../../components/common/PosterPlaceholder'
 import ConfirmDialog from '../../components/common/ConfirmDialog'
 import InfoDialog from '../../components/common/InfoDialog'
+import MovieTicketDialog from '../../components/common/MovieTicketDialog'
 import SeatMap from './components/SeatMap'
 import TossPaymentWidget from './components/TossPaymentWidget'
 import {
@@ -95,6 +96,8 @@ function BookingSeatPage() {
   const [showTeenAgeConfirm, setShowTeenAgeConfirm] = useState(false)
   const [showPaymentConfirm, setShowPaymentConfirm] = useState(false)
   const [resultDialog, setResultDialog] = useState(null) // { title, message, tone }
+  // 결제가 성공하면 텍스트 안내 대신 실제 모바일 영화 티켓처럼 보이는 모달을 띄웁니다.
+  const [completedBooking, setCompletedBooking] = useState(null)
 
   // 페이지 이동 시 맨 위로 스크롤하는 건 App.jsx의 전역 ScrollToTop이 처리합니다(라우트가
   // /booking/:id라 영화를 바꿔도 경로 자체가 바뀌어 거기서 함께 처리됩니다).
@@ -321,6 +324,19 @@ function BookingSeatPage() {
   const holidayPricing = showDate ? isWeekendOrHoliday(showDate) : false
   const timePeriod = timePeriodFor(showtime)
   const totalTickets = Object.values(ticketCounts).reduce((sum, count) => sum + count, 0)
+
+  // 인원수를 줄였는데 이미 선택해둔 좌석 수가 더 많으면, 가장 나중에 선택한 좌석부터 자동으로
+  // 선점을 풀어줍니다 - 그대로 두면 좌석은 계속 "선택됨"으로 남는데 결제 버튼만 막혀서, 어떤
+  // 좌석을 빼야 하는지 사용자가 직접 알아내야 했습니다.
+  useEffect(() => {
+    const excessCount = selectedSeatsRef.current.length - totalTickets
+    if (excessCount <= 0) return
+    const released = selectedSeatsRef.current.slice(-excessCount)
+    setSelectedSeats((prev) => prev.slice(0, prev.length - excessCount))
+    released.forEach((seatId) => releaseSeatHold(screeningId, seatId, user.id).catch(() => {}))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [totalTickets])
+
   const totalPrice = AGE_CATEGORIES.reduce(
     (sum, category) => sum + ticketCounts[category.key] * priceFor(category.key, showDate, showtime),
     0,
@@ -338,12 +354,7 @@ function BookingSeatPage() {
     setIsSubmitting(true)
     try {
       const booking = await createBooking(user.id, { screeningId, seatIds: selectedSeats, ticketCounts })
-      setResultDialog({
-        title: '결제가 완료됐어요 🎬',
-        message:
-          `"${booking.movieTitle}" ${booking.theaterName} ${booking.showDate} ${booking.showtime}\n` +
-          `좌석: ${booking.seats.join(', ')} · ${booking.totalPrice.toLocaleString()}원`,
-      })
+      setCompletedBooking(booking)
       setSelectedSeats([])
       setTicketCounts({ adult: 0, teen: 0, child: 0, senior: 0 })
       setShowPaymentWidget(false)
@@ -479,7 +490,7 @@ function BookingSeatPage() {
                           <div className="flex items-center gap-3">
                             <button
                               type="button"
-                              disabled={disallowed || showPaymentWidget}
+                              disabled={disallowed || showPaymentWidget || ticketCounts[category.key] === 0}
                               onClick={() => updateTicketCount(category.key, -1)}
                               className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-800 text-gray-300 hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
                             >
@@ -593,6 +604,10 @@ function BookingSeatPage() {
           tone={resultDialog.tone}
           onClose={() => setResultDialog(null)}
         />
+      )}
+
+      {completedBooking && (
+        <MovieTicketDialog booking={completedBooking} onClose={() => setCompletedBooking(null)} />
       )}
     </div>
   )

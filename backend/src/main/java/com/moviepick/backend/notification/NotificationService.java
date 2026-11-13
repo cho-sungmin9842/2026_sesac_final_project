@@ -4,6 +4,7 @@ import com.moviepick.backend.auth.User;
 import com.moviepick.backend.auth.UserRepository;
 import com.moviepick.backend.common.ApiException;
 import com.moviepick.backend.notification.dto.NotificationDto;
+import com.moviepick.backend.review.Review;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
@@ -55,6 +56,16 @@ public class NotificationService {
             notificationRepository.save(
                     new Notification(admin, bookingUser.getNickname() + "님이 예매를 취소했습니다 - " + summary, null)
             );
+        }
+    }
+
+    // 리뷰 신고 접수 - 신고자 본인에게는 알리지 않고(신고했다는 걸 스스로 알 필요는 없음), 관리자
+    // 전원에게만 알립니다. bookingId는 없으니(리뷰 신고라 예매와 무관) null로 둡니다.
+    public void notifyReviewReported(User reporter, Review review, String reasonLabel) {
+        String summary = "\"%s\" 리뷰 신고 (%s) - %s".formatted(
+                review.getMovieTitle(), reasonLabel, reporter.getNickname());
+        for (User admin : userRepository.findByAdminTrue()) {
+            notificationRepository.save(new Notification(admin, summary, null));
         }
     }
 

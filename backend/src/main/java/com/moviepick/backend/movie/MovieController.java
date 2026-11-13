@@ -40,9 +40,12 @@ public class MovieController {
             @RequestParam(defaultValue = "1") int page,
             @RequestParam(defaultValue = "20") int pageSize,
             // 검색창의 영화/배우/감독 드롭다운 선택값. KMDB 파라미터명과 동일하게 title/actor/director를 받습니다.
-            @RequestParam(defaultValue = "title") String field
+            @RequestParam(defaultValue = "title") String field,
+            // 포스터/관람등급 정보가 없는 영화를 결과에서 아예 빼고, 그만큼 다음 데이터를 더 받아와 한
+            // 페이지를 꽉 채웁니다(프론트에서 받은 뒤 걸러내면 그 페이지가 빈 자리투성이가 됩니다).
+            @RequestParam(defaultValue = "false") boolean hideIncomplete
     ) {
-        return movieService.search(query, genre, year, runtime, ageRating, sort, page, pageSize, field);
+        return movieService.search(query, genre, year, runtime, ageRating, sort, page, pageSize, field, hideIncomplete);
     }
 
     /**

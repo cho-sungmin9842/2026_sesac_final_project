@@ -121,7 +121,7 @@ function HomePage() {
           )}
           <MovieSection
             icon="🔥"
-            title={`오늘(${todayLabel()}) 개봉한 영화`}
+            title={`오늘(${todayLabel()})의 신작`}
             movies={popularMovies}
             maxVisible={popularMovies.length}
             showViewAll={false}

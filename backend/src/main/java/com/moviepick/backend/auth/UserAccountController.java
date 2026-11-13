@@ -5,6 +5,7 @@ import com.moviepick.backend.auth.dto.DeleteAccountRequest;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
@@ -20,6 +21,16 @@ public class UserAccountController {
 
     public UserAccountController(UserService userService) {
         this.userService = userService;
+    }
+
+    /**
+     * 로그인된 화면이 주기적으로 호출해 세션이 여전히 유효한지(계정이 남아있고 정지되지 않았는지)
+     * 확인합니다. 정지됐으면 403으로 응답해 프론트가 강제 로그아웃시킵니다(AuthContext.jsx 참고).
+     */
+    @GetMapping
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void checkSession(@RequestHeader("X-User-Id") Long userId) {
+        userService.verifySessionActive(userId);
     }
 
     @PutMapping("/password")

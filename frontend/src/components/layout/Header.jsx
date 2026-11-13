@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../auth/AuthContext'
 import { getMovieSuggestions, getPersonSuggestions } from '../../api/movieApi'
+import useMediaQuery from '../../hooks/useMediaQuery'
 import NotificationBell from './NotificationBell'
 import ThemeToggle from '../common/ThemeToggle'
 import VersionBadge from '../common/VersionBadge'
@@ -33,11 +34,17 @@ function Header() {
   const navigate = useNavigate()
   const location = useLocation()
   const { user, logout } = useAuth()
+  // Tailwind의 md(768px) breakpoint와 맞춰서, 데스크톱/모바일 중 실제로 보이는 쪽에만
+  // NotificationBell을 마운트합니다(CSS로만 숨기면 둘 다 항상 마운트돼 폴링이 2배로 돕니다).
+  const isDesktop = useMediaQuery('(min-width: 768px)')
   const [searchType, setSearchType] = useState(SEARCH_TYPES[0].value)
   const [searchText, setSearchText] = useState('')
   const [menuOpen, setMenuOpen] = useState(false)
   const [suggestions, setSuggestions] = useState([])
   const [showSuggestions, setShowSuggestions] = useState(false)
+  // 배우/감독 자동완성은 KMDB를 직접 조회해 제목(로컬 캐시)보다 눈에 띄게 느린데, 로딩 표시가
+  // 전혀 없어 사용자가 "멈췄나?" 하고 느낄 수 있다는 피드백이 있어 추가했습니다.
+  const [suggestionsLoading, setSuggestionsLoading] = useState(false)
   // 방향키(↑/↓)로 하이라이트한 자동완성 항목 번호 - -1이면 아무것도 고르지 않은 상태(Enter는 일반 검색).
   const [activeIndex, setActiveIndex] = useState(-1)
   const suggestionRequestId = useRef(0)
@@ -74,14 +81,21 @@ function Header() {
     if (programmaticText.current !== null && programmaticText.current === searchText) {
       // 이미 날아간 이전 요청의 응답이 뒤늦게 목록을 덮어쓰지 못하게 요청 번호도 올려둡니다.
       suggestionRequestId.current += 1
+      setSuggestionsLoading(false)
       return undefined
     }
     if (!searchText.trim() || !AUTOCOMPLETE_FIELDS.has(searchType)) {
       setSuggestions([])
+      setSuggestionsLoading(false)
       return undefined
     }
     const requestId = ++suggestionRequestId.current
     const timer = setTimeout(() => {
+      // showSuggestions도 여기서 같이 켜야 로딩 표시가 보입니다 - 원래 이 플래그는 응답이 와야(.then
+      // 안에서) 켜졌는데, 그러면 "검색 중..." 문구를 그리는 조건(showSuggestions && ...) 자체가
+      // 응답 전까지 항상 false라 로딩 표시가 뜰 기회가 없었습니다.
+      setSuggestionsLoading(true)
+      setShowSuggestions(true)
       // 제목은 영화 카드(id/title/year)를, 배우/감독은 "사람 이름" 문자열만 돌려받습니다 - 두 응답이
       // 서로 다른 모양이라, 아래 렌더링/클릭 처리도 searchType으로 나눠서 다룹니다.
       const fetchSuggestions =
@@ -91,12 +105,29 @@ function Header() {
           if (suggestionRequestId.current === requestId) {
             setSuggestions(results)
             setShowSuggestions(true)
+            setSuggestionsLoading(false)
           }
         })
-        .catch(() => {})
+        .catch(() => {
+          if (suggestionRequestId.current === requestId) {
+            setSuggestionsLoading(false)
+          }
+        })
     }, SUGGESTION_DEBOUNCE_MS)
     return () => clearTimeout(timer)
   }, [searchText, searchType])
+
+  // 검색 유형을 바꾸는 순간 이전 유형의 자동완성 결과(제목이면 영화 객체 배열, 배우/감독이면 이름
+  // 문자열 배열)를 바로 비웁니다 - 안 그러면 드롭다운이 열려 있는 채로 유형만 바뀔 때, 아직 새
+  // 유형의 응답이 도착하기 전까지 잠깐이라도 이전 유형의 데이터를 지금 유형의 렌더링 방식으로
+  // 그리려다(예: 영화 객체를 배우/감독 분기의 <span>{suggestion}</span>에 그대로 넣음) React가
+  // "객체는 자식으로 렌더링할 수 없다" 에러를 던지며 화면이 멈추는 문제가 있었습니다.
+  const handleSearchTypeChange = (value) => {
+    setSearchType(value)
+    setSuggestions([])
+    setShowSuggestions(false)
+    setSuggestionsLoading(false)
+  }
 
   const handleLogout = () => {
     logout()
@@ -161,7 +192,7 @@ function Header() {
     <form onSubmit={handleSearchSubmit} className="flex flex-1 items-center gap-2">
       <select
         value={searchType}
-        onChange={(event) => setSearchType(event.target.value)}
+        onChange={(event) => handleSearchTypeChange(event.target.value)}
         className="rounded-lg bg-slate-900 px-3 py-2 text-sm text-gray-300 focus:outline-none"
       >
         {SEARCH_TYPES.map((type) => (
@@ -187,19 +218,27 @@ function Header() {
           onBlur={() => setShowSuggestions(false)}
           onKeyDown={handleSearchKeyDown}
           role="combobox"
-          aria-expanded={showSuggestions && suggestions.length > 0}
+          aria-expanded={showSuggestions && (suggestionsLoading || suggestions.length > 0)}
           aria-autocomplete="list"
           autoComplete="off"
           placeholder={`${selectedSearchType.label}${selectedSearchType.particle} 입력해주세요`}
           className="w-full bg-transparent text-gray-100 placeholder:text-gray-500 focus:outline-none"
         />
 
-        {showSuggestions && suggestions.length > 0 && (
+        {showSuggestions && (suggestionsLoading || suggestions.length > 0) && (
           <ul
             role="listbox"
             className="absolute left-0 right-0 top-full z-30 mt-2 overflow-hidden rounded-lg border border-white/10 bg-slate-900 shadow-lg"
           >
-            {suggestions.map((suggestion, index) => (
+            {suggestionsLoading ? (
+              // 배우/감독 자동완성은 KMDB를 직접 조회해 제목보다 눈에 띄게 느릴 수 있어, 응답을
+              // 기다리는 동안 "멈춘 게 아니다"를 알려주는 로딩 표시입니다.
+              <li className="flex items-center gap-2 px-3 py-2 text-sm text-gray-400">
+                <span className="h-3 w-3 animate-spin rounded-full border-2 border-gray-500 border-t-gray-200" />
+                검색 중...
+              </li>
+            ) : (
+              suggestions.map((suggestion, index) => (
               <li
                 key={searchType === 'title' ? suggestion.id : suggestion}
                 role="option"
@@ -227,7 +266,8 @@ function Header() {
                   )}
                 </button>
               </li>
-            ))}
+              ))
+            )}
           </ul>
         )}
       </div>
@@ -257,14 +297,14 @@ function Header() {
           ))}
         </nav>
 
-        <div className="ml-4 hidden max-w-xl flex-1 md:flex">{searchForm}</div>
+        {isDesktop && <div className="ml-4 flex max-w-xl flex-1">{searchForm}</div>}
 
         <div className="ml-auto hidden items-center gap-4 md:flex">
           {/* 화면 폭별 표시: 1100px 이상은 188px 로 넓게 채우고, 900~1099px 은 글자를 16px 로 줄여 작게 표시하며,
               900px 보다 좁으면 숨깁니다(그 폭에서는 배지 때문에 메뉴/로그아웃 글자가 세로로 꺾이기 때문). */}
           <VersionBadge className="block shrink-0 min-[1100px]:w-[188px] max-[1100px]:text-[16px] max-[900px]:hidden" />
           <ThemeToggle />
-          <NotificationBell />
+          {isDesktop && <NotificationBell />}
           <span className="text-sm text-gray-400">{user?.nickname}</span>
           <NavLink to="/mypage" aria-label="마이페이지">
             <span className="block h-8 w-8 rounded-full bg-gradient-to-br from-orange-400 to-red-500" />
@@ -277,7 +317,7 @@ function Header() {
         {/* md 미만(모바일)에서만 보이는 햄버거 - 내비/검색/사용자 메뉴를 전부 아래 펼침 패널로 옮깁니다. */}
         <div className="ml-auto flex items-center gap-3 md:hidden">
           <ThemeToggle />
-          <NotificationBell />
+          {!isDesktop && <NotificationBell />}
           <button
             type="button"
             onClick={() => setMenuOpen((open) => !open)}

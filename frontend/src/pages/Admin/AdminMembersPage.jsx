@@ -1,15 +1,21 @@
 import { useEffect, useState } from 'react'
 import { useAuth } from '../../auth/AuthContext'
-import { getAllUsersForAdmin } from '../../api/userApi'
+import { getAllUsersForAdmin, suspendUser, deleteUserForAdmin } from '../../api/userApi'
 import MemberTable from './components/MemberTable'
 import StatCard from './components/StatCard'
+import SuspendReasonDialog from './components/SuspendReasonDialog'
+import ConfirmDialog from '../../components/common/ConfirmDialog'
+import InfoDialog from '../../components/common/InfoDialog'
 
 function AdminMembersPage() {
   const { user } = useAuth()
   const [members, setMembers] = useState([])
   const [status, setStatus] = useState('loading') // loading | ready | error
+  const [pendingSuspendMember, setPendingSuspendMember] = useState(null)
+  const [pendingDeleteMember, setPendingDeleteMember] = useState(null)
+  const [actionErrorMessage, setActionErrorMessage] = useState('')
 
-  useEffect(() => {
+  const loadMembers = () => {
     let cancelled = false
     getAllUsersForAdmin(user.id)
       .then((data) => {
@@ -24,7 +30,44 @@ function AdminMembersPage() {
     return () => {
       cancelled = true
     }
+  }
+
+  useEffect(loadMembers, [user.id])
+
+  // 온라인/오프라인 표시가 실시간처럼 느껴지도록, NotificationBell의 알림 폴링과 같은 주기로
+  // 다시 불러옵니다(수동 새로고침 없이도 방금 접속/이탈한 회원이 반영됩니다).
+  useEffect(() => {
+    const interval = setInterval(loadMembers, 20000)
+    return () => clearInterval(interval)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user.id])
+
+  // 정지시킬 때만 사유를 먼저 고르게 합니다(SuspendReasonDialog) - 해제는 사유가 필요 없어 바로 호출합니다.
+  const handleToggleSuspend = (member) => {
+    if (member.isSuspended) {
+      suspendUser(user.id, member.id, false)
+        .then(loadMembers)
+        .catch((error) => setActionErrorMessage(error.message))
+      return
+    }
+    setPendingSuspendMember(member)
+  }
+
+  const confirmSuspend = (reason) => {
+    const member = pendingSuspendMember
+    setPendingSuspendMember(null)
+    suspendUser(user.id, member.id, true, reason)
+      .then(loadMembers)
+      .catch((error) => setActionErrorMessage(error.message))
+  }
+
+  const confirmDelete = () => {
+    const member = pendingDeleteMember
+    setPendingDeleteMember(null)
+    deleteUserForAdmin(user.id, member.id)
+      .then(loadMembers)
+      .catch((error) => setActionErrorMessage(error.message))
+  }
 
   const adminMembers = members.filter((member) => member.isAdmin)
   const regularMembers = members.filter((member) => !member.isAdmin)
@@ -76,11 +119,43 @@ function AdminMembersPage() {
               {regularMembers.length === 0 ? (
                 <p className="text-sm text-gray-400">가입한 일반회원이 없습니다.</p>
               ) : (
-                <MemberTable members={regularMembers} />
+                <MemberTable
+                  members={regularMembers}
+                  onToggleSuspend={handleToggleSuspend}
+                  onDelete={(member) => setPendingDeleteMember(member)}
+                />
               )}
             </div>
           </div>
         </>
+      )}
+
+      {pendingSuspendMember && (
+        <SuspendReasonDialog
+          member={pendingSuspendMember}
+          onConfirm={confirmSuspend}
+          onCancel={() => setPendingSuspendMember(null)}
+        />
+      )}
+
+      {pendingDeleteMember && (
+        <ConfirmDialog
+          title="회원 삭제"
+          message={`"${pendingDeleteMember.nickname}"(${pendingDeleteMember.username}) 계정을 삭제할까요?\n리뷰·예매·찜 등 관련 데이터가 모두 함께 삭제되며, 되돌릴 수 없습니다.`}
+          confirmLabel="삭제"
+          danger
+          onConfirm={confirmDelete}
+          onCancel={() => setPendingDeleteMember(null)}
+        />
+      )}
+
+      {actionErrorMessage && (
+        <InfoDialog
+          title="처리 실패"
+          message={actionErrorMessage}
+          tone="error"
+          onClose={() => setActionErrorMessage('')}
+        />
       )}
     </div>
   )
