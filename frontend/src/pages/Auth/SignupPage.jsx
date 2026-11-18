@@ -3,12 +3,44 @@ import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../auth/AuthContext'
 import AuthShell from './components/AuthShell'
 import { josa } from '../../utils/korean'
+import { EyeIcon, EyeOffIcon } from '../../components/icons/EyeIcons'
+
+// 비밀번호 규칙 체크리스트용 아이콘 - 만족하면 채워진 체크, 아니면 X 표시입니다.
+function RuleIcon({ passed }) {
+  return passed ? (
+    <svg viewBox="0 0 20 20" width="16" height="16" fill="currentColor" aria-hidden="true">
+      <path
+        fillRule="evenodd"
+        d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.7-9.3a1 1 0 00-1.4-1.4L9 10.6 7.7 9.3a1 1 0 00-1.4 1.4l2 2a1 1 0 001.4 0l4-4z"
+        clipRule="evenodd"
+      />
+    </svg>
+  ) : (
+    <svg viewBox="0 0 20 20" width="16" height="16" fill="currentColor" aria-hidden="true">
+      <path
+        fillRule="evenodd"
+        d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.7 7.3a1 1 0 00-1.4 1.4L8.6 10l-1.3 1.3a1 1 0 101.4 1.4L10 11.4l1.3 1.3a1 1 0 001.4-1.4L11.4 10l1.3-1.3a1 1 0 00-1.4-1.4L10 8.6 8.7 7.3z"
+        clipRule="evenodd"
+      />
+    </svg>
+  )
+}
 
 // 아이디: 영문+숫자 조합만(한글/공백/특수문자 불가, 영문과 숫자 둘 다 포함).
 const USERNAME_PATTERN = /^(?=.*[A-Za-z])(?=.*\d)[A-Za-z0-9]+$/
 // 비밀번호: 8자 이상, 영문+숫자 조합 또는 영문+숫자+특수문자 조합만(영문·숫자는 필수, 특수문자는 선택,
 // 공백/한글 불가) - 백엔드 SignupRequest의 @Pattern과 동일한 규칙입니다.
 const PASSWORD_PATTERN = /^(?=.*[A-Za-z])(?=.*\d)[A-Za-z0-9!@#$%^&*()_+\-=[\]{}:;,.<>/?~]{8,}$/
+const PASSWORD_ALLOWED_CHARS = /^[A-Za-z0-9!@#$%^&*()_+\-=[\]{}:;,.<>/?~]*$/
+
+// 비밀번호 입력란 아래 실시간 체크리스트 - 제출 후 에러로만 알려주는 대신, 타이핑하는 동안 바로
+// 어떤 조건을 만족했는지 보여줍니다.
+const PASSWORD_RULES = [
+  { key: 'length', label: '8자 이상', test: (pw) => pw.length >= 8 },
+  { key: 'letter', label: '영문 포함', test: (pw) => /[A-Za-z]/.test(pw) },
+  { key: 'digit', label: '숫자 포함', test: (pw) => /\d/.test(pw) },
+  { key: 'charset', label: '한글·공백 제외', test: (pw) => PASSWORD_ALLOWED_CHARS.test(pw) },
+]
 
 function SignupPage() {
   const { signup } = useAuth()
@@ -18,6 +50,9 @@ function SignupPage() {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [passwordConfirm, setPasswordConfirm] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
+  const [showPasswordConfirm, setShowPasswordConfirm] = useState(false)
+  const [passwordFocused, setPasswordFocused] = useState(false)
   const [agreed, setAgreed] = useState(false)
   const [error, setError] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -82,10 +117,7 @@ function SignupPage() {
     }`
 
   return (
-    <AuthShell
-      mode="signup"
-      tagline="가입하고 나만의 취향 프로필을 만들어보세요. 찜한 영화와 리뷰 기록이 쌓일수록 AI 추천이 더 정확해집니다."
-    >
+    <AuthShell mode="signup" tagline="정보 탐색부터 예매까지, AI 하나로 끝내세요">
       <form onSubmit={handleSubmit} noValidate className="space-y-4">
         <div>
           <label htmlFor="nickname" className="mb-1 block text-sm font-medium text-slate-700">
@@ -121,30 +153,82 @@ function SignupPage() {
           <label htmlFor="signup-password" className="mb-1 block text-sm font-medium text-slate-700">
             비밀번호
           </label>
-          <input
-            id="signup-password"
-            type="password"
-            required
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            placeholder="영문, 숫자 포함 8자 이상(특수문자 가능)"
-            className={inputClassName(passwordHasError)}
-          />
+          <div className="relative">
+            <input
+              id="signup-password"
+              type={showPassword ? 'text' : 'password'}
+              required
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              onFocus={() => setPasswordFocused(true)}
+              onBlur={() => setPasswordFocused(false)}
+              placeholder="비밀번호를 입력해주세요"
+              className={`${inputClassName(passwordHasError)} pr-10`}
+            />
+            <button
+              type="button"
+              onClick={() => setShowPassword((prev) => !prev)}
+              aria-label={showPassword ? '비밀번호 숨기기' : '비밀번호 보기'}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+            >
+              {showPassword ? <EyeOffIcon /> : <EyeIcon />}
+            </button>
+          </div>
+
+          {(passwordFocused || password.length > 0) && (
+            <ul className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1.5 text-sm">
+              {PASSWORD_RULES.map((rule) => {
+                const passed = rule.test(password)
+                return (
+                  <li
+                    key={rule.key}
+                    className={`flex items-center gap-1.5 font-semibold ${
+                      passed ? 'text-emerald-600' : 'text-slate-500'
+                    }`}
+                  >
+                    <RuleIcon passed={passed} />
+                    {rule.label}
+                  </li>
+                )
+              })}
+            </ul>
+          )}
         </div>
 
         <div>
           <label htmlFor="password-confirm" className="mb-1 block text-sm font-medium text-slate-700">
             비밀번호 확인
           </label>
-          <input
-            id="password-confirm"
-            type="password"
-            required
-            value={passwordConfirm}
-            onChange={(event) => setPasswordConfirm(event.target.value)}
-            placeholder="비밀번호를 다시 입력해주세요"
-            className={inputClassName(passwordHasError)}
-          />
+          <div className="relative">
+            <input
+              id="password-confirm"
+              type={showPasswordConfirm ? 'text' : 'password'}
+              required
+              value={passwordConfirm}
+              onChange={(event) => setPasswordConfirm(event.target.value)}
+              placeholder="비밀번호를 다시 입력해주세요"
+              className={`${inputClassName(passwordHasError)} pr-10`}
+            />
+            <button
+              type="button"
+              onClick={() => setShowPasswordConfirm((prev) => !prev)}
+              aria-label={showPasswordConfirm ? '비밀번호 숨기기' : '비밀번호 보기'}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+            >
+              {showPasswordConfirm ? <EyeOffIcon /> : <EyeIcon />}
+            </button>
+          </div>
+
+          {passwordConfirm.length > 0 && (
+            <p
+              className={`mt-2 flex items-center gap-1.5 text-sm font-semibold ${
+                password === passwordConfirm ? 'text-emerald-600' : 'text-rose-600'
+              }`}
+            >
+              <RuleIcon passed={password === passwordConfirm} />
+              {password === passwordConfirm ? '비밀번호가 일치합니다' : '비밀번호가 일치하지 않습니다'}
+            </p>
+          )}
         </div>
 
         <label className="flex items-center gap-1.5 text-xs text-slate-500">

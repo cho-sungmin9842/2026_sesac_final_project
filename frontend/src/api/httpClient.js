@@ -1,4 +1,4 @@
-const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080'
+export const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080'
 
 // 로그인/리뷰/예매/다운로드처럼 "누가 요청했는지" 알아야 하는 API에서 공통으로 씁니다.
 // 정식 토큰 인증 대신, 로그인된 사용자의 id를 X-User-Id 헤더로 실어 보내는 데모 수준의 인증입니다.

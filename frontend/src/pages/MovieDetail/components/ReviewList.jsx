@@ -48,16 +48,27 @@ function formatDate(isoString) {
 
 // reportedReviewIds: 이번에 접속한 화면에서 이미 신고 처리된 리뷰 id 모음(새로고침하면 초기화됨) -
 // 서버에 "내가 신고한 목록"을 따로 물어보지 않고, 신고 성공 직후에만 버튼을 "신고 완료"로 바꿔줍니다.
-function ReviewList({ reviews, currentUser, onEdit, onDelete, onReport, reportedReviewIds }) {
+// onToggleHelpful: "도움이 됐어요" 버튼 - 신고와 대칭되는 긍정적 상호작용이라, review.helpfulCount/
+// helpfulByMe는 서버가 리뷰 목록 조회 시점에 이미 계산해서 내려줍니다(ReviewService.list 참고).
+// highlightedReviewId: "도움이 됐어요" 알림을 눌러 들어왔을 때(?reviewId=) 어떤 리뷰로 스크롤해왔는지 -
+// 그 리뷰만 잠깐 테두리로 강조해서 눈에 띄게 합니다(MovieDetailPage가 스크롤 자체는 이미 처리).
+function ReviewList({ reviews, currentUser, onEdit, onDelete, onReport, reportedReviewIds, onToggleHelpful, highlightedReviewId }) {
   return (
     <div className="space-y-4">
       {reviews.map((review) => {
         const isOwner = currentUser != null && review.userId === currentUser
         const isReported = reportedReviewIds?.has(review.id)
         const date = formatDate(review.createdAt)
+        const isHighlighted = highlightedReviewId != null && String(review.id) === String(highlightedReviewId)
 
         return (
-          <div key={review.id} className="rounded-lg bg-slate-900 p-4">
+          <div
+            key={review.id}
+            id={`review-${review.id}`}
+            className={`rounded-lg bg-slate-900 p-4 ${
+              isHighlighted ? 'ring-2 ring-indigo-500' : ''
+            }`}
+          >
             <div className="flex items-center justify-between">
               <p className="flex items-center gap-2 text-sm font-semibold text-gray-100">
                 📄 {review.authorNickname}
@@ -67,17 +78,31 @@ function ReviewList({ reviews, currentUser, onEdit, onDelete, onReport, reported
             {date && <p className="mt-1 text-right text-xs text-gray-500">작성일: {date}</p>}
             <ReviewContent content={review.content} />
             {isOwner && (
-              <div className="mt-2 flex justify-end gap-2 text-xs text-gray-400">
-                <button type="button" onClick={() => onEdit(review)} className="hover:text-white">
-                  수정
-                </button>
-                <button type="button" onClick={() => onDelete(review)} className="hover:text-red-400">
-                  삭제
-                </button>
+              <div className="mt-2 flex items-center justify-between text-xs text-gray-400">
+                {/* 본인 리뷰라 추천할 수 없으니(서버도 막음) 버튼이 아니라 숫자만 읽기 전용으로
+                    보여줍니다 - 클릭해도 아무 핸들러가 없어 추천 수를 스스로 올리거나 내릴 수 없습니다. */}
+                <span>👍 도움이 됐어요 {review.helpfulCount ?? 0}명</span>
+                <div className="flex gap-2">
+                  <button type="button" onClick={() => onEdit(review)} className="hover:text-white">
+                    수정
+                  </button>
+                  <button type="button" onClick={() => onDelete(review)} className="hover:text-red-400">
+                    삭제
+                  </button>
+                </div>
               </div>
             )}
             {!isOwner && currentUser != null && (
-              <div className="mt-2 flex justify-end text-xs text-gray-400">
+              <div className="mt-2 flex items-center justify-end gap-3 text-xs text-gray-400">
+                <button
+                  type="button"
+                  onClick={() => onToggleHelpful(review)}
+                  className={`flex items-center gap-1 font-semibold ${
+                    review.helpfulByMe ? 'text-indigo-400' : 'hover:text-indigo-400'
+                  }`}
+                >
+                  👍 도움이 됐어요{review.helpfulCount > 0 ? ` ${review.helpfulCount}` : ''}
+                </button>
                 <button
                   type="button"
                   disabled={isReported}

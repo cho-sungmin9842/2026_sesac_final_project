@@ -8,6 +8,9 @@ public record NotificationDto(
         Long id,
         String message,
         Long bookingId,
+        Long reviewReportId,
+        Long reviewId,
+        String movieId,
         boolean read,
         LocalDateTime createdAt
 ) {
@@ -16,6 +19,9 @@ public record NotificationDto(
                 notification.getId(),
                 notification.getMessage(),
                 notification.getBookingId(),
+                notification.getReviewReportId(),
+                notification.getReviewId(),
+                notification.getMovieId(),
                 notification.isRead(),
                 notification.getCreatedAt()
         );

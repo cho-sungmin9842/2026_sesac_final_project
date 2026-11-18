@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../../auth/AuthContext'
 import { useWishlist } from '../../wishlist/WishlistContext'
 import { getMovieDetail } from '../../api/movieApi'
-import { addReview, deleteReview, getReviews, reportReview, updateReview } from '../../api/reviewApi'
+import { addReview, deleteReview, getReviews, reportReview, toggleReviewHelpful, updateReview } from '../../api/reviewApi'
 import { addWatched, isWatched, removeWatched } from '../../api/watchedApi'
 import { recordMovieView } from '../../api/recentlyViewedApi'
 import AiSummaryBox from './components/AiSummaryBox'
@@ -33,6 +33,10 @@ const REVIEW_SORT_OPTIONS = [
 
 function MovieDetailPage() {
   const { id } = useParams()
+  // 리뷰 "도움이 됐어요" 알림을 눌러 들어오면 ?reviewId=로 어떤 리뷰인지 넘어옵니다 - 리뷰 목록이
+  // 뜨면 그 리뷰까지 스크롤하고 잠깐 하이라이트합니다.
+  const [searchParams] = useSearchParams()
+  const highlightedReviewId = searchParams.get('reviewId')
   const { user } = useAuth()
   const { wishlistedIds, toggle: toggleWishlist } = useWishlist()
   const [status, setStatus] = useState('loading') // loading | ready | error
@@ -56,7 +60,7 @@ function MovieDetailPage() {
     let cancelled = false
     setStatus('loading')
 
-    Promise.all([getMovieDetail(id), getReviews(id), isWatched(user.id, id)])
+    Promise.all([getMovieDetail(id), getReviews(id, user.id), isWatched(user.id, id)])
       .then(([dto, reviewList, watchedFlag]) => {
         if (cancelled) return
         const normalized = normalizeDetail(dto)
@@ -77,6 +81,14 @@ function MovieDetailPage() {
       cancelled = true
     }
   }, [id, user.id])
+
+  // 리뷰 목록이 뜨고 나서야 실제 DOM에 해당 리뷰가 존재하므로, status가 ready로 바뀐 뒤에 스크롤합니다.
+  useEffect(() => {
+    if (status !== 'ready' || !highlightedReviewId) return
+    const element = document.getElementById(`review-${highlightedReviewId}`)
+    if (!element) return
+    element.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }, [status, highlightedReviewId])
 
   const handleToggleWishlist = () => {
     toggleWishlist({ id, title: detail.title, posterUrl: detail.posterUrl })
@@ -103,7 +115,7 @@ function MovieDetailPage() {
       } else {
         await addReview(id, user.id, { movieTitle: detail.title, score, content })
       }
-      setReviews(await getReviews(id))
+      setReviews(await getReviews(id, user.id))
       setDialogOpen(false)
       setEditingReview(null)
     } catch (error) {
@@ -125,7 +137,7 @@ function MovieDetailPage() {
     setPendingDeleteReview(null)
     try {
       await deleteReview(id, review.id, user.id)
-      setReviews(await getReviews(id))
+      setReviews(await getReviews(id, user.id))
     } catch (error) {
       setDeleteErrorMessage(error.message)
     }
@@ -149,6 +161,19 @@ function MovieDetailPage() {
       setReportDialog({ message: '신고가 접수되었습니다. 관리자가 확인 후 처리합니다.' })
     } catch (error) {
       setReportDialog({ message: error.message, tone: 'error' })
+    }
+  }
+
+  // 리뷰 "도움이 됐어요" - 서버가 토글 결과(갱신된 추천 수/내 추천 여부)를 바로 돌려줘서, 전체
+  // 리뷰 목록을 다시 불러오지 않고 그 리뷰 하나만 로컬 상태에서 갱신합니다.
+  const handleToggleHelpful = async (review) => {
+    try {
+      const { helpfulCount, helpfulByMe } = await toggleReviewHelpful(id, review.id, user.id)
+      setReviews((prev) =>
+        prev.map((candidate) => (candidate.id === review.id ? { ...candidate, helpfulCount, helpfulByMe } : candidate))
+      )
+    } catch (error) {
+      window.alert(error.message)
     }
   }
 
@@ -295,6 +320,8 @@ function MovieDetailPage() {
               onDelete={handleReviewDelete}
               onReport={handleReviewReport}
               reportedReviewIds={reportedReviewIds}
+              onToggleHelpful={handleToggleHelpful}
+              highlightedReviewId={highlightedReviewId}
             />
           ) : (
             <p className="text-sm text-gray-500">아직 등록된 리뷰가 없습니다.</p>

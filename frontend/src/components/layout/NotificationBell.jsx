@@ -7,27 +7,24 @@ import {
   markAllNotificationsRead,
   markNotificationRead,
 } from '../../api/notificationApi'
+import { getReviewReportDetail } from '../../api/reviewApi'
+import ReviewReportDetailDialog from '../common/ReviewReportDetailDialog'
+import NotificationItem from './NotificationItem'
 
 const POLL_INTERVAL_MS = 20000
-
-function formatRelative(iso) {
-  const diffMs = Date.now() - new Date(iso).getTime()
-  const diffMin = Math.floor(diffMs / 60000)
-  if (diffMin < 1) return '방금 전'
-  if (diffMin < 60) return `${diffMin}분 전`
-  const diffHour = Math.floor(diffMin / 60)
-  if (diffHour < 24) return `${diffHour}시간 전`
-  return `${Math.floor(diffHour / 24)}일 전`
-}
+// 드롭다운에는 최근 것만 미리보기로 보여주고, 전체 내역은 "전체보기"로 /notifications에서 봅니다.
+const PREVIEW_COUNT = 8
 
 // 예매 완료 시 본인/관리자에게 쌓이는 알림을 보여주는 종 아이콘. 안 읽은 개수를 주기적으로 폴링하고,
-// 클릭하면 전체 목록을 펼쳐서 보여줍니다(클릭 시 해당 알림을 읽음 처리).
+// 클릭하면 최근 알림 미리보기를 펼쳐서 보여줍니다(클릭 시 해당 알림을 읽음 처리).
 function NotificationBell() {
   const { user } = useAuth()
   const [open, setOpen] = useState(false)
   const [unreadCount, setUnreadCount] = useState(0)
   const [notifications, setNotifications] = useState([])
   const containerRef = useRef(null)
+  // 리뷰 신고 알림의 "보러가기" 다이얼로그 상태 - null이면 닫힌 상태입니다.
+  const [reportDialog, setReportDialog] = useState(null)
 
   const refreshUnreadCount = () => {
     getUnreadCount(user.id)
@@ -72,6 +69,22 @@ function NotificationBell() {
       .catch(() => {})
   }
 
+  const handleItemMarkRead = (notification) => {
+    setOpen(false)
+    handleNotificationClick(notification)
+  }
+
+  // 리뷰 신고 알림의 "보러가기" - 회원 관리 화면으로 이동하는 대신, 신고된 리뷰 내용/작성자와
+  // 신고 사유/신고자를 바로 다이얼로그로 보여줍니다.
+  const handleViewReviewReport = (notification) => {
+    setOpen(false)
+    handleNotificationClick(notification)
+    setReportDialog({ loading: true, error: '', detail: null })
+    getReviewReportDetail(user.id, notification.reviewReportId)
+      .then((detail) => setReportDialog({ loading: false, error: '', detail }))
+      .catch((err) => setReportDialog({ loading: false, error: err.message, detail: null }))
+  }
+
   const handleMarkAllRead = () => {
     markAllNotificationsRead(user.id)
       .then(() => {
@@ -111,54 +124,33 @@ function NotificationBell() {
             {notifications.length === 0 && (
               <p className="px-4 py-6 text-center text-sm text-gray-500">알림이 없습니다.</p>
             )}
-            {notifications.map((notification) => {
-              const itemClassName = `block w-full border-b border-white/5 px-4 py-3 text-left text-sm last:border-0 hover:bg-slate-800 ${
-                notification.read ? 'text-gray-400' : 'text-gray-100'
-              }`
-              const itemContent = (
-                <>
-                  <p className="leading-relaxed">{notification.message}</p>
-                  <p className="mt-1 flex items-center gap-1.5 text-xs text-gray-500">
-                    {!notification.read && <span className="h-1.5 w-1.5 rounded-full bg-indigo-500" />}
-                    {formatRelative(notification.createdAt)}
-                    {/* bookingId가 있는(예매 생성/임박/좌석변경) 알림만 "보러가기"로 연결합니다.
-                        관리자는 마이페이지 접근 권한이 없어(RequireAuth) 이동 대상이 없으므로 제외합니다. */}
-                    {notification.bookingId && !user.isAdmin && (
-                      <span className="ml-auto font-semibold text-indigo-400">보러가기 →</span>
-                    )}
-                  </p>
-                </>
-              )
-
-              if (notification.bookingId && !user.isAdmin) {
-                return (
-                  <Link
-                    key={notification.id}
-                    to="/mypage"
-                    onClick={() => {
-                      setOpen(false)
-                      handleNotificationClick(notification)
-                    }}
-                    className={itemClassName}
-                  >
-                    {itemContent}
-                  </Link>
-                )
-              }
-
-              return (
-                <button
-                  key={notification.id}
-                  type="button"
-                  onClick={() => handleNotificationClick(notification)}
-                  className={itemClassName}
-                >
-                  {itemContent}
-                </button>
-              )
-            })}
+            {notifications.slice(0, PREVIEW_COUNT).map((notification) => (
+              <NotificationItem
+                key={notification.id}
+                notification={notification}
+                isAdmin={user.isAdmin}
+                onMarkRead={handleItemMarkRead}
+                onViewReviewReport={handleViewReviewReport}
+              />
+            ))}
           </div>
+          <Link
+            to={user.isAdmin ? '/admin/notifications' : '/notifications'}
+            onClick={() => setOpen(false)}
+            className="block border-t border-white/5 px-4 py-2.5 text-center text-xs font-semibold text-indigo-400 hover:bg-slate-800 hover:text-indigo-300"
+          >
+            전체보기
+          </Link>
         </div>
+      )}
+
+      {reportDialog && (
+        <ReviewReportDetailDialog
+          loading={reportDialog.loading}
+          error={reportDialog.error}
+          detail={reportDialog.detail}
+          onClose={() => setReportDialog(null)}
+        />
       )}
     </div>
   )

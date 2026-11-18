@@ -17,6 +17,12 @@ public interface UserRepository extends JpaRepository<User, Long> {
 
     boolean existsByNickname(String nickname);
 
+    // 아이디 찾기(AuthService.findUsername) - 닉네임으로 계정을 찾은 뒤 비밀번호가 맞는지 확인합니다.
+    Optional<User> findByNickname(String nickname);
+
+    // 구글 재로그인 시 같은 계정을 찾는 키(OAuthController 콜백).
+    Optional<User> findByOauthProviderAndOauthProviderId(String oauthProvider, String oauthProviderId);
+
     // 예매 완료 알림을 전원에게 보낼 관리자 목록.
     List<User> findByAdminTrue();
 

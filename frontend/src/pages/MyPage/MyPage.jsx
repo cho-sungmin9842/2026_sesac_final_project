@@ -375,13 +375,16 @@ function MyReviewList({ reviews, onEdit, onDelete }) {
             </span>
           </div>
           <p className="mt-2 text-sm text-gray-300">{review.content}</p>
-          <div className="mt-2 flex justify-end gap-2 text-xs text-gray-400">
-            <button type="button" onClick={() => onEdit(review)} className="hover:text-white">
-              수정
-            </button>
-            <button type="button" onClick={() => onDelete(review)} className="hover:text-red-400">
-              삭제
-            </button>
+          <div className="mt-2 flex items-center justify-between text-xs text-gray-400">
+            <span>👍 도움이 됐어요 {review.helpfulCount ?? 0}명</span>
+            <div className="flex gap-2">
+              <button type="button" onClick={() => onEdit(review)} className="hover:text-white">
+                수정
+              </button>
+              <button type="button" onClick={() => onDelete(review)} className="hover:text-red-400">
+                삭제
+              </button>
+            </div>
           </div>
         </div>
       ))}

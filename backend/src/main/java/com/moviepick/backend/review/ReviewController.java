@@ -1,6 +1,7 @@
 package com.moviepick.backend.review;
 
 import com.moviepick.backend.review.dto.ReviewDto;
+import com.moviepick.backend.review.dto.ReviewHelpfulResponse;
 import com.moviepick.backend.review.dto.ReviewReportRequest;
 import com.moviepick.backend.review.dto.ReviewRequest;
 import jakarta.validation.Valid;
@@ -27,8 +28,11 @@ public class ReviewController {
     }
 
     @GetMapping
-    public List<ReviewDto> list(@PathVariable String movieId) {
-        return reviewService.list(movieId);
+    public List<ReviewDto> list(
+            @PathVariable String movieId,
+            @RequestHeader(value = "X-User-Id", required = false) Long userId
+    ) {
+        return reviewService.list(movieId, userId);
     }
 
     @PostMapping
@@ -70,5 +74,18 @@ public class ReviewController {
             @RequestBody ReviewReportRequest request
     ) {
         reviewService.reportReview(movieId, reviewId, userId, request.reason());
+    }
+
+    /**
+     * 본인이 작성하지 않은 리뷰를 "도움이 됐어요"로 추천하거나, 다시 눌러서 추천을 취소합니다
+     * (신고와 대칭되는 긍정적 상호작용) - ReviewList.jsx의 "도움이 됐어요" 버튼용.
+     */
+    @PostMapping("/{reviewId}/helpful")
+    public ReviewHelpfulResponse toggleHelpful(
+            @PathVariable String movieId,
+            @PathVariable Long reviewId,
+            @RequestHeader("X-User-Id") Long userId
+    ) {
+        return reviewService.toggleHelpful(movieId, reviewId, userId);
     }
 }

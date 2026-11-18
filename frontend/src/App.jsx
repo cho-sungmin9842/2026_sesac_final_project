@@ -12,11 +12,13 @@ import BookingSeatPage from './pages/Booking/BookingSeatPage'
 import PaymentSuccessPage from './pages/Payment/PaymentSuccessPage'
 import PaymentFailPage from './pages/Payment/PaymentFailPage'
 import MyPage from './pages/MyPage/MyPage'
+import NotificationsPage from './pages/Notifications/NotificationsPage'
 import AdminReportsPage from './pages/Admin/AdminReportsPage'
 import AdminMembersPage from './pages/Admin/AdminMembersPage'
 import AdminScreeningsPage from './pages/Admin/AdminScreeningsPage'
 import LoginPage from './pages/Auth/LoginPage'
 import SignupPage from './pages/Auth/SignupPage'
+import OAuthCompletePage from './pages/Auth/OAuthCompletePage'
 import NotFoundPage from './pages/NotFound/NotFoundPage'
 import RequireAuth from './auth/RequireAuth'
 
@@ -27,6 +29,7 @@ function App() {
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/signup" element={<SignupPage />} />
+        <Route path="/oauth/complete" element={<OAuthCompletePage />} />
 
         <Route
           element={
@@ -45,6 +48,7 @@ function App() {
           <Route path="/payment/success" element={<PaymentSuccessPage />} />
           <Route path="/payment/fail" element={<PaymentFailPage />} />
           <Route path="/mypage" element={<MyPage />} />
+          <Route path="/notifications" element={<NotificationsPage />} />
           <Route path="*" element={<NotFoundPage />} />
         </Route>
 
@@ -60,6 +64,7 @@ function App() {
           <Route path="reports" element={<AdminReportsPage />} />
           <Route path="members" element={<AdminMembersPage />} />
           <Route path="screenings" element={<AdminScreeningsPage />} />
+          <Route path="notifications" element={<NotificationsPage />} />
         </Route>
       </Routes>
     </>

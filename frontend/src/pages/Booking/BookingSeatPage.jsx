@@ -52,6 +52,13 @@ function isBookable(screening) {
 // 패턴을 그대로 따릅니다.
 const SEAT_POLL_INTERVAL_MS = 5000
 
+// 좌석 선점 카운트다운 표시용 - "4:32"처럼 분:초로 보여줍니다.
+function formatCountdown(totalSeconds) {
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = totalSeconds % 60
+  return `${minutes}:${String(seconds).padStart(2, '0')}`
+}
+
 function PillButton({ active, onClick, children }) {
   return (
     <button
@@ -98,6 +105,13 @@ function BookingSeatPage() {
   const [resultDialog, setResultDialog] = useState(null) // { title, message, tone }
   // 결제가 성공하면 텍스트 안내 대신 실제 모바일 영화 티켓처럼 보이는 모달을 띄웁니다.
   const [completedBooking, setCompletedBooking] = useState(null)
+  // 좌석 선점 카운트다운 - 1초마다 갱신해 "남은 시간"을 실시간으로 보여줍니다.
+  const [now, setNow] = useState(() => Date.now())
+
+  useEffect(() => {
+    const interval = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(interval)
+  }, [])
 
   // 페이지 이동 시 맨 위로 스크롤하는 건 App.jsx의 전역 ScrollToTop이 처리합니다(라우트가
   // /booking/:id라 영화를 바꿔도 경로 자체가 바뀌어 거기서 함께 처리됩니다).
@@ -262,7 +276,10 @@ function BookingSeatPage() {
       return
     }
     try {
-      await holdSeat(screeningId, seat.id, user.id)
+      const held = await holdSeat(screeningId, seat.id, user.id)
+      // 선점 응답에 담긴 heldUntil을 바로 반영해야, 다음 폴링(최대 5초)을 기다리지 않고도 카운트다운이
+      // 선택 즉시 나타납니다.
+      setSeats((prev) => prev.map((candidate) => (candidate.id === held.id ? held : candidate)))
       setSelectedSeats((prev) => [...prev, seat.id])
     } catch (error) {
       setResultDialog({ title: '선택할 수 없는 좌석이에요', message: error.message, tone: 'error' })
@@ -347,6 +364,31 @@ function BookingSeatPage() {
     .map((seatId) => seats.find((seat) => seat.id === seatId))
     .filter(Boolean)
     .map((seat) => `${seat.rowLabel}${seat.colNo}`)
+
+  // 좌석 선점 남은 시간 - 내가 선점 중인 좌석들의 heldUntil 중 가장 빠른 시각을 기준으로 삼습니다
+  // (보통 거의 같은 시각이지만, 혹시 어긋나더라도 가장 먼저 만료되는 좌석을 기준으로 보여줘야 안전합니다).
+  const myHeldUntilTimestamps = seats
+    .filter((seat) => selectedSeats.includes(seat.id) && seat.heldByMe && seat.heldUntil)
+    .map((seat) => new Date(seat.heldUntil).getTime())
+  const holdDeadline = myHeldUntilTimestamps.length > 0 ? Math.min(...myHeldUntilTimestamps) : null
+  const remainingSeconds = holdDeadline != null ? Math.max(0, Math.round((holdDeadline - now) / 1000)) : null
+
+  // 선점 갱신(5초 폴링)이 어떤 이유로든 실패해 카운트다운이 정말 0에 도달하면, 선택을 초기화하고
+  // 다시 고르게 안내합니다. 결제 요청이 이미 진행 중일 때는 건드리지 않습니다(제출 도중 좌석이
+  // 사라지면 더 혼란스럽습니다).
+  useEffect(() => {
+    if (isSubmitting) return
+    if (remainingSeconds !== 0) return
+    setSelectedSeats([])
+    setShowPaymentWidget(false)
+    setResultDialog({
+      title: '좌석 선점 시간이 만료됐어요',
+      message: '선택해두신 좌석의 선점 시간이 지나 선택이 초기화되었습니다. 다시 선택해주세요.',
+      tone: 'error',
+    })
+    refreshSeats()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [remainingSeconds, isSubmitting])
 
   // 결제위젯의 "결제하기"는 토스 실제 결제창으로 넘어가지 않고, 이 자리에서 바로 예매를 생성합니다
   // (결제수단 선택 UI는 테스트/데모용으로 그대로 보여주되, 실제 결제 승인 절차는 거치지 않습니다).
@@ -520,6 +562,16 @@ function BookingSeatPage() {
                 <div className={`py-8 ${showPaymentWidget ? 'pointer-events-none opacity-60' : ''}`}>
                   <SeatMap seats={seats} selectedSeats={selectedSeats} onToggleSeat={toggleSeat} />
                 </div>
+
+                {remainingSeconds != null && (
+                  <p
+                    className={`mt-4 flex items-center gap-1.5 text-sm font-semibold ${
+                      remainingSeconds <= 60 ? 'animate-pulse text-rose-400' : 'text-amber-400'
+                    }`}
+                  >
+                    ⏱ 좌석 선점 남은 시간 {formatCountdown(remainingSeconds)}
+                  </p>
+                )}
 
                 <div className="flex flex-col gap-4 border-t border-white/10 pt-6 sm:flex-row sm:items-center sm:justify-between">
                   <div>

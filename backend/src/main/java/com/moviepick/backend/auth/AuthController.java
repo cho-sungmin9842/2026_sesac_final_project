@@ -1,10 +1,11 @@
 package com.moviepick.backend.auth;
 
+import com.moviepick.backend.auth.dto.FindUsernameRequest;
+import com.moviepick.backend.auth.dto.FindUsernameResponse;
 import com.moviepick.backend.auth.dto.LoginRequest;
 import com.moviepick.backend.auth.dto.ResetPasswordRequest;
 import com.moviepick.backend.auth.dto.ResetPasswordResponse;
 import com.moviepick.backend.auth.dto.SignupRequest;
-import com.moviepick.backend.auth.dto.SocialLoginRequest;
 import com.moviepick.backend.auth.dto.UserDto;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -32,13 +33,13 @@ public class AuthController {
         return authService.login(request);
     }
 
-    @PostMapping("/social")
-    public UserDto socialLogin(@Valid @RequestBody SocialLoginRequest request) {
-        return authService.loginOrCreateSocialUser(request.provider());
-    }
-
     @PostMapping("/reset-password")
     public ResetPasswordResponse resetPassword(@Valid @RequestBody ResetPasswordRequest request) {
         return authService.resetPassword(request);
+    }
+
+    @PostMapping("/find-username")
+    public FindUsernameResponse findUsername(@Valid @RequestBody FindUsernameRequest request) {
+        return authService.findUsername(request);
     }
 }

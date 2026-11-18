@@ -60,13 +60,22 @@ public class NotificationService {
     }
 
     // 리뷰 신고 접수 - 신고자 본인에게는 알리지 않고(신고했다는 걸 스스로 알 필요는 없음), 관리자
-    // 전원에게만 알립니다. bookingId는 없으니(리뷰 신고라 예매와 무관) null로 둡니다.
-    public void notifyReviewReported(User reporter, Review review, String reasonLabel) {
+    // 전원에게만 알립니다. bookingId는 없으니(리뷰 신고라 예매와 무관) null로 두고, 대신
+    // reviewReportId를 담아 관리자가 "보러가기"로 신고 상세를 조회할 수 있게 합니다.
+    public void notifyReviewReported(User reporter, Review review, String reasonLabel, Long reviewReportId) {
         String summary = "\"%s\" 리뷰 신고 (%s) - %s".formatted(
                 review.getMovieTitle(), reasonLabel, reporter.getNickname());
         for (User admin : userRepository.findByAdminTrue()) {
-            notificationRepository.save(new Notification(admin, summary, null));
+            notificationRepository.save(new Notification(admin, summary, null, reviewReportId));
         }
+    }
+
+    // 리뷰 "도움이 됐어요" 추천 - 신고(notifyReviewReported)와 대칭되는 긍정적 알림입니다. 신고와
+    // 달리 관리자 조치가 필요 없는 일이라 관리자에게는 보내지 않고, 추천받은 리뷰의 작성자 본인에게만 보냅니다.
+    public void notifyReviewHelpful(User reviewAuthor, Review review, User voter) {
+        String summary = "\"%s\" 리뷰가 \"도움이 됐어요\"를 받았습니다 - %s님"
+                .formatted(review.getMovieTitle(), voter.getNickname());
+        notificationRepository.save(new Notification(reviewAuthor, summary, review.getId(), review.getMovieId()));
     }
 
     // 마이페이지 좌석 배치도의 "좌석변경" - 예매 자체는 그대로 남아있는 변경이라 본인에게만 알리고,

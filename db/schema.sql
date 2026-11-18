@@ -31,9 +31,14 @@ CREATE TABLE IF NOT EXISTS users (
     -- 관리자 "회원 관리" 화면의 온라인/오프라인 표시용 - 인증된 API 요청(X-User-Id 헤더)이 올 때마다
     -- UserActivityInterceptor가 갱신합니다. NULL이면 한 번도 활동이 감지되지 않은 것(오프라인)입니다.
     last_active_at DATETIME   NULL,
+    -- 구글 로그인으로 가입한 계정의 식별 정보 - 일반 가입 계정은 둘 다 NULL입니다.
+    -- oauth_provider_id는 각 서비스가 내려주는 고유 사용자 id로, 재로그인 시 같은 계정을 찾는 키입니다.
+    oauth_provider    VARCHAR(20)  NULL,
+    oauth_provider_id VARCHAR(255) NULL,
     created_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT uq_users_username UNIQUE (username),
-    CONSTRAINT uq_users_nickname UNIQUE (nickname)
+    CONSTRAINT uq_users_nickname UNIQUE (nickname),
+    CONSTRAINT uq_users_oauth UNIQUE (oauth_provider, oauth_provider_id)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
 
 -- 기본 관리자 계정. password_hash는 BCryptPasswordEncoder로 미리 해시해둔 값이라 앱을 거치지 않고도
@@ -82,6 +87,31 @@ CREATE TABLE IF NOT EXISTS review_reports (
     CONSTRAINT fk_review_reports_review FOREIGN KEY (review_id) REFERENCES reviews (id) ON DELETE CASCADE,
     CONSTRAINT fk_review_reports_reporter FOREIGN KEY (reporter_user_id) REFERENCES users (id) ON DELETE CASCADE,
     CONSTRAINT uq_review_reports_review_reporter UNIQUE (review_id, reporter_user_id)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
+
+-- 리뷰 "도움이 됐어요" 추천 - 신고(review_reports)와 대칭되는 긍정적 상호작용입니다. 같은 사람이
+-- 같은 리뷰를 두 번 추천할 수 없고(uq), 버튼을 다시 누르면 추천을 취소합니다(ReviewService.toggleHelpful).
+CREATE TABLE IF NOT EXISTS review_helpful_votes (
+    id         BIGINT AUTO_INCREMENT PRIMARY KEY,
+    review_id  BIGINT   NOT NULL,
+    user_id    BIGINT   NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_review_helpful_votes_review FOREIGN KEY (review_id) REFERENCES reviews (id) ON DELETE CASCADE,
+    CONSTRAINT fk_review_helpful_votes_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
+    CONSTRAINT uq_review_helpful_votes_review_user UNIQUE (review_id, user_id)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
+
+-- "도움이 됐어요" 알림을 같은 사람에게 평생 최초 1회만 보내기 위한 이력입니다. review_helpful_votes는
+-- 추천을 취소하면 행이 지워지지만(토글), 이 테이블은 한 번 쌓이면 절대 지우지 않습니다 - 그래야
+-- 설정→해제→설정을 반복해도 알림이 매번 다시 가지 않습니다(ReviewService.toggleHelpful 참고).
+CREATE TABLE IF NOT EXISTS review_helpful_notifications (
+    id            BIGINT AUTO_INCREMENT PRIMARY KEY,
+    review_id     BIGINT   NOT NULL,
+    voter_user_id BIGINT   NOT NULL,
+    created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_review_helpful_notifications_review FOREIGN KEY (review_id) REFERENCES reviews (id) ON DELETE CASCADE,
+    CONSTRAINT fk_review_helpful_notifications_voter FOREIGN KEY (voter_user_id) REFERENCES users (id) ON DELETE CASCADE,
+    CONSTRAINT uq_review_helpful_notifications_review_voter UNIQUE (review_id, voter_user_id)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
 
 -- 마이페이지 "찜한 영화" 통계/탭.
@@ -312,13 +342,24 @@ CREATE TABLE IF NOT EXISTS booking_seats (
 -- 예매 완료 알림. user_id는 "알림을 받는 사람"입니다 - 예매한 본인에게 1건, 관리자(is_admin=TRUE) 전원에게
 -- 각 1건씩 생성합니다(booking_id로 원래 예매를 참조, 예매가 지워지면 알림도 같이 지워집니다).
 CREATE TABLE IF NOT EXISTS notifications (
-    id         BIGINT AUTO_INCREMENT PRIMARY KEY,
-    user_id    BIGINT       NOT NULL,
-    message    VARCHAR(500) NOT NULL,
-    booking_id BIGINT       NULL,
+    id               BIGINT AUTO_INCREMENT PRIMARY KEY,
+    user_id          BIGINT       NOT NULL,
+    message          VARCHAR(500) NOT NULL,
+    booking_id       BIGINT       NULL,
+    -- 리뷰 신고 알림(NotificationService.notifyReviewReported)에만 값이 들어갑니다 - 관리자가
+    -- 알림의 "보러가기"를 눌렀을 때 어떤 신고 내역인지 찾는 키입니다. booking_id와 달리 CASCADE가
+    -- 아니라 SET NULL로 둬서, 신고 내역이 지워져도 알림 자체는 남습니다(그 땐 상세 조회만 실패).
+    review_report_id BIGINT       NULL,
+    -- 리뷰 "도움이 됐어요" 알림(NotificationService.notifyReviewHelpful)에만 값이 들어갑니다 - 클릭
+    -- 시 그 리뷰가 있는 영화 상세로 이동합니다. review_id는 리뷰가 지워지면 SET NULL되지만, movie_id는
+    -- movie_title처럼 그대로 복사해두는 값이라(비정규화) 리뷰가 지워져도 영화 상세로는 계속 이동할 수 있습니다.
+    review_id  BIGINT      NULL,
+    movie_id   VARCHAR(64) NULL,
     is_read    BOOLEAN      NOT NULL DEFAULT FALSE,
     created_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_notifications_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
     CONSTRAINT fk_notifications_booking FOREIGN KEY (booking_id) REFERENCES bookings (id) ON DELETE CASCADE,
+    CONSTRAINT fk_notifications_review_report FOREIGN KEY (review_report_id) REFERENCES review_reports (id) ON DELETE SET NULL,
+    CONSTRAINT fk_notifications_review FOREIGN KEY (review_id) REFERENCES reviews (id) ON DELETE SET NULL,
     INDEX idx_notifications_user (user_id, created_at)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;

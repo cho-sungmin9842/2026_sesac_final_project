@@ -51,6 +51,14 @@ public class User {
     @Column(name = "last_active_at")
     private LocalDateTime lastActiveAt;
 
+    // 구글 로그인으로 가입한 계정만 값이 있습니다(일반 가입 계정은 둘 다 null) -
+    // OAuthController 콜백에서 재로그인 시 같은 계정을 찾는 키로 씁니다(provider + provider가 내려준 사용자 id).
+    @Column(name = "oauth_provider", length = 20)
+    private String oauthProvider;
+
+    @Column(name = "oauth_provider_id", length = 255)
+    private String oauthProviderId;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
@@ -85,5 +93,10 @@ public class User {
 
     public void setSuspensionReason(String suspensionReason) {
         this.suspensionReason = suspensionReason;
+    }
+
+    public void setOauthIdentity(String oauthProvider, String oauthProviderId) {
+        this.oauthProvider = oauthProvider;
+        this.oauthProviderId = oauthProviderId;
     }
 }

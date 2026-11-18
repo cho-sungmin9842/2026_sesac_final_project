@@ -8,3 +8,12 @@ kmdb:
 # AI 추천 채팅에 쓸 Gemini API 키. https://aistudio.google.com/apikey 에서 무료로 발급받아 붙여넣으세요.
 gemini:
   api-key: YOUR_GEMINI_API_KEY
+
+# 구글 소셜 로그인. Redirect URI는 반드시 application.yml의 oauth.google.redirect-uri와 똑같이
+# (http://localhost:8080/api/auth/oauth/google/callback) 등록하세요.
+oauth:
+  # - 구글: https://console.cloud.google.com/apis/credentials (OAuth 동의 화면 설정
+  #   -> 사용자 인증 정보 만들기 -> OAuth 클라이언트 ID(웹 애플리케이션) -> 승인된 리디렉션 URI 등록)
+  google:
+    client-id: YOUR_GOOGLE_CLIENT_ID
+    client-secret: YOUR_GOOGLE_CLIENT_SECRET
