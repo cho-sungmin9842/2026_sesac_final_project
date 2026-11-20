@@ -70,6 +70,31 @@ public class NotificationService {
         }
     }
 
+    // 리뷰 신고 처리 결과 - 관리자가 신고된 리뷰를 삭제하면, 그 리뷰를 신고했던 사용자 전원에게
+    // 처리 결과를 알립니다(ReviewService.adminDelete). 지금까지 신고자는 "접수되었습니다"까지만 알고
+    // 그 이후 실제로 어떻게 처리됐는지 알 방법이 없었습니다.
+    public void notifyReviewReportResolved(User reporter, String movieTitle) {
+        String summary = "\"%s\" 리뷰 신고가 처리되었습니다 - 신고하신 리뷰가 삭제되었습니다.".formatted(movieTitle);
+        notificationRepository.save(new Notification(reporter, summary, null));
+    }
+
+    // 신고 처리 결과(리뷰 삭제 취소) - 관리자가 검토 후 리뷰를 삭제하지 않기로 했을 때, notifyReviewReportResolved와
+    // 대칭으로 다른 문구를 보냅니다(ReviewService.cancelReviewDeletion).
+    public void notifyReviewDeletionCancelled(User reporter, String movieTitle) {
+        String summary = "\"%s\" 리뷰 신고가 처리되었습니다 - 검토 결과 삭제하지 않기로 했습니다.".formatted(movieTitle);
+        notificationRepository.save(new Notification(reporter, summary, null));
+    }
+
+    // 리뷰 삭제 - 신고자뿐 아니라 그 리뷰를 쓴 작성자 본인에게도 어떤 영화의 리뷰가, 어떤 사유로
+    // 삭제됐는지 알립니다(ReviewService.adminDelete). reasonLabels가 비어 있으면 신고 없이 관리자가
+    // 직접 지운 경우라, 사유 문구 없이 삭제 사실만 안내합니다.
+    public void notifyReviewDeletedForAuthor(User author, String movieTitle, String reasonLabels) {
+        String summary = (reasonLabels == null || reasonLabels.isBlank())
+                ? "\"%s\" 리뷰가 관리자에 의해 삭제되었습니다.".formatted(movieTitle)
+                : "\"%s\" 리뷰가 삭제되었습니다 - 사유: %s".formatted(movieTitle, reasonLabels);
+        notificationRepository.save(new Notification(author, summary, null));
+    }
+
     // 리뷰 "도움이 됐어요" 추천 - 신고(notifyReviewReported)와 대칭되는 긍정적 알림입니다. 신고와
     // 달리 관리자 조치가 필요 없는 일이라 관리자에게는 보내지 않고, 추천받은 리뷰의 작성자 본인에게만 보냅니다.
     public void notifyReviewHelpful(User reviewAuthor, Review review, User voter) {

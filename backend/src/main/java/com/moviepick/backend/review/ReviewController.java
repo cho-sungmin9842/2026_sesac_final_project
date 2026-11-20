@@ -13,7 +13,9 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
 
@@ -87,5 +89,32 @@ public class ReviewController {
             @RequestHeader("X-User-Id") Long userId
     ) {
         return reviewService.toggleHelpful(movieId, reviewId, userId);
+    }
+
+    /**
+     * 본인 리뷰에 사진을 첨부합니다(다시 올리면 이전 사진을 대체) - WriteReviewDialog.jsx가 리뷰를
+     * 쓰거나 수정한 직후, 사진을 골랐을 때만 이어서 호출합니다.
+     */
+    @PostMapping("/{reviewId}/photo")
+    public ReviewDto uploadPhoto(
+            @PathVariable String movieId,
+            @PathVariable Long reviewId,
+            @RequestHeader("X-User-Id") Long userId,
+            @RequestParam("photo") MultipartFile photo
+    ) {
+        return reviewService.uploadPhoto(movieId, reviewId, userId, photo);
+    }
+
+    /**
+     * 본인 리뷰에서 첨부 사진을 떼어냅니다 - WriteReviewDialog.jsx에서 사진 선택 창을 열었다가
+     * 취소해 미리보기를 비운 뒤 수정을 제출했을 때 호출됩니다.
+     */
+    @DeleteMapping("/{reviewId}/photo")
+    public ReviewDto removePhoto(
+            @PathVariable String movieId,
+            @PathVariable Long reviewId,
+            @RequestHeader("X-User-Id") Long userId
+    ) {
+        return reviewService.removePhoto(movieId, reviewId, userId);
     }
 }

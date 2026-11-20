@@ -22,6 +22,11 @@ spring:
     properties:
       hibernate:
         format_sql: false
+  # 리뷰 사진 등 파일 업로드 용량 제한(기본값 1MB는 너무 작아서 올려둡니다).
+  servlet:
+    multipart:
+      max-file-size: 5MB
+      max-request-size: 5MB
 
 kmdb:
   base-url: https://api.koreafilm.or.kr/openapi-data2/wisenut/search_api/search_json2.jsp
@@ -43,6 +48,10 @@ app:
   version: ${APP_VERSION:V.2.0}
   cors:
     allowed-origins: http://localhost:5173,http://localhost:5174
+  # 리뷰 사진 첨부 - 업로드된 파일을 저장할 디스크 경로(상대 경로면 백엔드 실행 디렉터리 기준)이자,
+  # WebConfig가 "/uploads/**"로 그대로 서빙하는 경로입니다.
+  upload:
+    dir: ${UPLOAD_DIR:uploads}
 
 # 구글 소셜 로그인. client-id/client-secret은 Google Cloud Console에 앱을 등록해야 발급받을 수
 # 있어 application-local.yml에 채워 넣습니다(커밋되지 않음). redirect-uri는 콘솔에 "승인된 리디렉션 URI"로

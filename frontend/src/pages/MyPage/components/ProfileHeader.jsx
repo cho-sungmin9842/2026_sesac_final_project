@@ -14,12 +14,16 @@ function ProfileHeader({ user, onChangePassword, onDeleteAccount }) {
               비밀번호 변경
             </button>
           </div>
-          <p className="text-sm text-gray-400">
-            가입일 {user.joinedAt}
-            <button type="button" onClick={onDeleteAccount} className="ml-3 text-xs text-gray-600 hover:text-rose-400 hover:underline">
+          <div className="flex items-center gap-2 text-sm text-gray-400">
+            <span>가입일 {user.joinedAt}</span>
+            <button
+              type="button"
+              onClick={onDeleteAccount}
+              className="rounded-md bg-slate-800 px-2 py-1 text-xs font-semibold text-rose-400 hover:bg-rose-500/20"
+            >
               회원 탈퇴
             </button>
-          </p>
+          </div>
         </div>
       </div>
 

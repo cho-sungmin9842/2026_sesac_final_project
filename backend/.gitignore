@@ -40,3 +40,7 @@ out/
 # KMDB ServiceKey 등 개인 로컬 설정 - 절대 커밋하지 않습니다.
 # 새로 clone한 사람은 application-local.example.yml을 복사해서 키를 채우세요.
 src/main/resources/application-local.yml
+
+### 업로드된 파일 ###
+# 리뷰 사진 등 사용자가 올린 파일(app.upload.dir) - 실행 중에 생기는 데이터라 커밋하지 않습니다.
+/uploads/

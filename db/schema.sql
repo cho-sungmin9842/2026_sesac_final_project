@@ -67,6 +67,12 @@ CREATE TABLE IF NOT EXISTS reviews (
     user_id     BIGINT      NOT NULL,
     score       INT         NOT NULL,
     content     TEXT        NOT NULL,
+    -- 사용자가 직접 첨부한 사진(선택) - 실제 파일은 디스크(app.upload.dir)에 저장하고, 여기엔
+    -- 그 파일을 서빙하는 경로("/uploads/reviews/<uuid>.<확장자>")만 저장합니다. 디스크에 저장하는
+    -- 파일명은 충돌 방지를 위해 UUID로 새로 만들기 때문에, 사용자가 실제로 골랐던 원본 파일명은
+    -- 여기 따로 저장해두지 않으면 알 길이 없습니다(리뷰 수정 화면에 보여주는 용도).
+    photo_url           VARCHAR(500) NULL,
+    photo_original_name VARCHAR(255) NULL,
     created_at  DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at  DATETIME    NULL,
     CONSTRAINT fk_reviews_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
@@ -112,6 +118,23 @@ CREATE TABLE IF NOT EXISTS review_helpful_notifications (
     CONSTRAINT fk_review_helpful_notifications_review FOREIGN KEY (review_id) REFERENCES reviews (id) ON DELETE CASCADE,
     CONSTRAINT fk_review_helpful_notifications_voter FOREIGN KEY (voter_user_id) REFERENCES users (id) ON DELETE CASCADE,
     CONSTRAINT uq_review_helpful_notifications_review_voter UNIQUE (review_id, voter_user_id)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
+
+-- 관리자 "리뷰 관리" 화면의 삭제 이력 - 리뷰/신고가 삭제로 영영 사라진 뒤에도 "누가 언제 왜 지웠는지"를
+-- 남겨두기 위한 스냅샷입니다. 삭제되는 리뷰/작성자/관리자를 그대로 참조하면 그들이 나중에 지워질 때
+-- 이 로그까지 같이 사라지므로, FK 없이 당시 값을 복사해 저장합니다(review_id는 참고용 숫자일 뿐).
+CREATE TABLE IF NOT EXISTS review_deletion_logs (
+    id                        BIGINT AUTO_INCREMENT PRIMARY KEY,
+    review_id                 BIGINT       NOT NULL,
+    movie_title               VARCHAR(255) NOT NULL,
+    review_author_nickname    VARCHAR(100) NOT NULL,
+    review_content            TEXT         NOT NULL,
+    review_score              INT          NOT NULL,
+    -- 신고로 인한 삭제가 아니면(관리자가 직접 지운 경우) NULL입니다.
+    report_reasons            VARCHAR(500) NULL,
+    deleted_by_admin_nickname VARCHAR(100) NOT NULL,
+    deleted_at                DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_review_deletion_logs_deleted_at (deleted_at)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
 
 -- 마이페이지 "찜한 영화" 통계/탭.

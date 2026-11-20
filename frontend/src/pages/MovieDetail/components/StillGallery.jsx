@@ -1,13 +1,55 @@
-import { useState } from 'react'
+import { useLayoutEffect, useRef, useState } from 'react'
 
-// KMDB 스틸컷 원본은 대체로 200px대의 작은 썸네일이라(실측: 207×138px 수준), 그대로 작게 띄우면
-// 휑해 보입니다. CGV 등 극장 사이트의 이미지 갤러리처럼 모든 컷이 같은 크기의 고정 프레임 안에서
-// 슬라이드로 넘어가도록 하고, 프레임 자체는 원본보다 한 단계 넉넉하게(약 1.25배 수준) 잡았습니다.
-const FRAME_WIDTH = 320
-const FRAME_HEIGHT = 213
+// CSS @keyframes 애니메이션은 매번 "밀려나 있는 시작 상태"로 뚝 떨어졌다가 재생되는 느낌이 들어
+// 부드럽지 않았습니다. 대신 같은 <img> 엘리먼트를 그대로 두고 transform/opacity를 직접
+// transition으로 보간합니다 - 시작 상태를 지정 → 강제 리플로우 → 끝 상태로 전환, 순서로 2프레임
+// 뒤에 트랜지션을 거는 방식이라 브라우저가 매 프레임 보간해 훨씬 매끄럽게 움직입니다.
+const SLIDE_OFFSET_PX = 32
+const SLIDE_DURATION_MS = 320
+const SLIDE_EASING = 'cubic-bezier(0.22, 1, 0.36, 1)'
 
 function StillDialog({ stillUrls, index, onClose, onPrev, onNext }) {
   const hasMultiple = stillUrls.length > 1
+  const isFirst = index === 0
+  const isLast = index === stillUrls.length - 1
+
+  const imgRef = useRef(null)
+  const prevIndexRef = useRef(index)
+  const [src, setSrc] = useState(stillUrls[index])
+
+  useLayoutEffect(() => {
+    const direction = index >= prevIndexRef.current ? 'next' : 'prev'
+    prevIndexRef.current = index
+
+    const img = imgRef.current
+    if (!img) {
+      setSrc(stillUrls[index])
+      return
+    }
+
+    // 1) 트랜지션을 끈 채로, 이동 방향 쪽에 밀려나 투명한 "시작 상태"로 이미지를 바꿉니다.
+    img.style.transition = 'none'
+    img.style.opacity = '0'
+    img.style.transform = `translateX(${direction === 'next' ? SLIDE_OFFSET_PX : -SLIDE_OFFSET_PX}px)`
+    setSrc(stillUrls[index])
+
+    // 2) 두 프레임 뒤(브라우저가 "시작 상태"를 실제로 한 번 그리고 난 뒤) 트랜지션을 켜고
+    //    "끝 상태"로 되돌려, 그 사이가 부드럽게 보간되도록 합니다.
+    const raf1 = requestAnimationFrame(() => {
+      const raf2 = requestAnimationFrame(() => {
+        img.style.transition = `transform ${SLIDE_DURATION_MS}ms ${SLIDE_EASING}, opacity ${SLIDE_DURATION_MS}ms ease`
+        img.style.opacity = '1'
+        img.style.transform = 'translateX(0)'
+      })
+      img.dataset.raf2 = String(raf2)
+    })
+
+    return () => {
+      cancelAnimationFrame(raf1)
+      if (img.dataset.raf2) cancelAnimationFrame(Number(img.dataset.raf2))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [index])
 
   return (
     <div
@@ -35,44 +77,36 @@ function StillDialog({ stillUrls, index, onClose, onPrev, onNext }) {
           </button>
         </div>
 
-        {/* 고정 크기 프레임 안에서 사진들을 가로로 나란히 두고, index에 맞춰 translateX로 밀어
-            CGV 갤러리처럼 좌우로 슬라이드되는 전환 효과를 줍니다. object-cover로 프레임을 빈틈없이
-            채웁니다(비율이 안 맞는 가장자리만 살짝 잘립니다). */}
-        <div
-          className="relative overflow-hidden rounded-lg bg-black"
-          style={{ width: FRAME_WIDTH, height: FRAME_HEIGHT, maxWidth: '92vw', maxHeight: '70svh' }}
-        >
-          <div
-            className="flex h-full transition-transform duration-300 ease-out"
-            style={{ width: `${stillUrls.length * 100}%`, transform: `translateX(-${(index * 100) / stillUrls.length}%)` }}
-          >
-            {stillUrls.map((url, i) => (
-              <div key={url} className="h-full shrink-0" style={{ width: `${100 / stillUrls.length}%` }}>
-                <img src={url} alt={`스틸컷 ${i + 1}`} loading="lazy" className="h-full w-full object-cover" />
-              </div>
-            ))}
-          </div>
-        </div>
+        {/* KMDB 원본 크기 그대로 보여줍니다(확대/크롭 없음) - 뷰포트보다 큰 경우에만 max-width/
+            max-height로 줄어듭니다. transform/opacity는 위 useLayoutEffect가 직접 제어합니다. */}
+        <img
+          ref={imgRef}
+          src={src}
+          alt={`스틸컷 ${index + 1}`}
+          className="block rounded-lg bg-black"
+          style={{ maxWidth: '92vw', maxHeight: '70svh' }}
+        />
 
-        {hasMultiple && (
-          <>
-            <button
-              type="button"
-              onClick={onPrev}
-              aria-label="이전 스틸컷"
-              className="absolute left-2 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-white/10 text-xl text-white hover:bg-white/20"
-            >
-              ‹
-            </button>
-            <button
-              type="button"
-              onClick={onNext}
-              aria-label="다음 스틸컷"
-              className="absolute right-2 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-white/10 text-xl text-white hover:bg-white/20"
-            >
-              ›
-            </button>
-          </>
+        {/* 맨 처음/마지막 컷에서는 더 이동할 곳이 없으니(순환하지 않음) 그쪽 화살표를 아예 숨깁니다. */}
+        {hasMultiple && !isFirst && (
+          <button
+            type="button"
+            onClick={onPrev}
+            aria-label="이전 스틸컷"
+            className="absolute left-2 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-white/10 text-xl text-white hover:bg-white/20"
+          >
+            ‹
+          </button>
+        )}
+        {hasMultiple && !isLast && (
+          <button
+            type="button"
+            onClick={onNext}
+            aria-label="다음 스틸컷"
+            className="absolute right-2 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-white/10 text-xl text-white hover:bg-white/20"
+          >
+            ›
+          </button>
         )}
       </div>
     </div>
@@ -85,8 +119,9 @@ function StillGallery({ stillUrls }) {
 
   if (!stillUrls || stillUrls.length === 0) return null
 
-  const showPrev = () => setSelectedIndex((prev) => (prev - 1 + stillUrls.length) % stillUrls.length)
-  const showNext = () => setSelectedIndex((prev) => (prev + 1) % stillUrls.length)
+  // 화살표가 맨 처음/마지막 컷에서는 보이지 않으니, 그 너머로는 넘어가지 않습니다(순환 없음).
+  const showPrev = () => setSelectedIndex((prev) => Math.max(prev - 1, 0))
+  const showNext = () => setSelectedIndex((prev) => Math.min(prev + 1, stillUrls.length - 1))
 
   return (
     <div className="mt-10">

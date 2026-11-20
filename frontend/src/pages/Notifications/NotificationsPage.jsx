@@ -145,6 +145,7 @@ function NotificationsPage() {
           loading={reportDialog.loading}
           error={reportDialog.error}
           detail={reportDialog.detail}
+          adminUserId={user.isAdmin ? user.id : null}
           onClose={() => setReportDialog(null)}
         />
       )}

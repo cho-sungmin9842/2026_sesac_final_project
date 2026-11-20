@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '../../auth/AuthContext'
 import { getMovieDetail } from '../../api/movieApi'
 import { getScreenings, getScreeningSeats, holdSeat, releaseSeatHold } from '../../api/screeningApi'
@@ -75,6 +75,7 @@ function PillButton({ active, onClick, children }) {
 
 function BookingSeatPage() {
   const { id } = useParams()
+  const navigate = useNavigate()
   const { user } = useAuth()
   const [movie, setMovie] = useState(null)
   // 실제 상영정보(매주 월요일 자정 배치가 생성해둔 이번 주 분량) - 지난 회차는 예매 대상이 아니라 미리 거릅니다.
@@ -107,11 +108,40 @@ function BookingSeatPage() {
   const [completedBooking, setCompletedBooking] = useState(null)
   // 좌석 선점 카운트다운 - 1초마다 갱신해 "남은 시간"을 실시간으로 보여줍니다.
   const [now, setNow] = useState(() => Date.now())
+  // 선점 만료 1분 전 토스트 안내 - WishlistContext.jsx의 하단 토스트와 같은 패턴입니다.
+  const [expiryToastMessage, setExpiryToastMessage] = useState(null)
+  const expiryToastTimerRef = useRef(null)
+  // 같은 선점 건에 대해 1분 경고를 한 번만 울리기 위한 플래그 - holdDeadline이 바뀌면(새로 좌석을
+  // 선택하면) 다시 울릴 수 있도록 리셋됩니다.
+  const hasWarnedExpiryRef = useRef(false)
 
   useEffect(() => {
     const interval = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(interval)
   }, [])
+
+  useEffect(() => () => clearTimeout(expiryToastTimerRef.current), [])
+
+  // 사운드 재생용 오디오 파일을 따로 두지 않고, Web Audio API로 짧은 비프음을 그 자리에서 만들어
+  // 냅니다 - 브라우저 자동재생 정책 때문에 실패할 수 있는데(예: 아직 페이지와 상호작용이 없었던 경우),
+  // 그 경우는 토스트만으로도 충분하니 조용히 무시합니다.
+  const playExpiryBeep = () => {
+    try {
+      const AudioContextClass = window.AudioContext || window.webkitAudioContext
+      const ctx = new AudioContextClass()
+      const oscillator = ctx.createOscillator()
+      const gain = ctx.createGain()
+      oscillator.type = 'sine'
+      oscillator.frequency.value = 880
+      gain.gain.setValueAtTime(0.15, ctx.currentTime)
+      oscillator.connect(gain)
+      gain.connect(ctx.destination)
+      oscillator.start()
+      oscillator.stop(ctx.currentTime + 0.3)
+    } catch {
+      // 조용히 무시 - 알림은 토스트로도 충분합니다.
+    }
+  }
 
   // 페이지 이동 시 맨 위로 스크롤하는 건 App.jsx의 전역 ScrollToTop이 처리합니다(라우트가
   // /booking/:id라 영화를 바꿔도 경로 자체가 바뀌어 거기서 함께 처리됩니다).
@@ -372,6 +402,23 @@ function BookingSeatPage() {
     .map((seat) => new Date(seat.heldUntil).getTime())
   const holdDeadline = myHeldUntilTimestamps.length > 0 ? Math.min(...myHeldUntilTimestamps) : null
   const remainingSeconds = holdDeadline != null ? Math.max(0, Math.round((holdDeadline - now) / 1000)) : null
+
+  // 선점 만료 1분 전에 토스트 + 비프음으로 한 번 더 알려줍니다 - 화면에 작게 줄어드는 숫자만으로는
+  // 결제에 열중하다 놓치기 쉽습니다. 같은 선점 건에서는 한 번만 울리고, 좌석을 다시 선택해 새 선점이
+  // 생기면(remainingSeconds가 null을 거쳐갔다가 다시 생기면) 또 울릴 수 있게 리셋합니다.
+  useEffect(() => {
+    if (remainingSeconds == null) {
+      hasWarnedExpiryRef.current = false
+      return
+    }
+    if (remainingSeconds <= 60 && remainingSeconds > 0 && !hasWarnedExpiryRef.current) {
+      hasWarnedExpiryRef.current = true
+      setExpiryToastMessage('⏱ 좌석 선점이 곧 만료됩니다! 1분 안에 결제를 완료해주세요.')
+      clearTimeout(expiryToastTimerRef.current)
+      expiryToastTimerRef.current = setTimeout(() => setExpiryToastMessage(null), 4000)
+      playExpiryBeep()
+    }
+  }, [remainingSeconds])
 
   // 선점 갱신(5초 폴링)이 어떤 이유로든 실패해 카운트다운이 정말 0에 도달하면, 선택을 초기화하고
   // 다시 고르게 안내합니다. 결제 요청이 이미 진행 중일 때는 건드리지 않습니다(제출 도중 좌석이
@@ -659,7 +706,23 @@ function BookingSeatPage() {
       )}
 
       {completedBooking && (
-        <MovieTicketDialog booking={completedBooking} onClose={() => setCompletedBooking(null)} />
+        <MovieTicketDialog
+          booking={completedBooking}
+          confirmLabel="확인"
+          onClose={() => {
+            setCompletedBooking(null)
+            // 예매 완료 직후 "확인"을 누르면 마이페이지의 예매 내역 탭(기본 탭)으로 이동합니다.
+            navigate('/mypage')
+          }}
+        />
+      )}
+
+      {expiryToastMessage && (
+        <div className="pointer-events-none fixed inset-x-0 bottom-8 z-[100] flex justify-center px-4">
+          <div className="rounded-full bg-rose-600/95 px-5 py-2.5 text-sm font-semibold text-white shadow-lg ring-1 ring-white/10">
+            {expiryToastMessage}
+          </div>
+        </div>
       )}
     </div>
   )

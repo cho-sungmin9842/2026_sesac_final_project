@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { BASE_URL } from '../../../api/httpClient'
 
 // 이 길이를 넘는 리뷰는 잘라서 보여주고 "더보기"로 펼칠 수 있게 합니다 - 긴 리뷰 하나가 화면
 // 전체를 차지해서 다른 리뷰를 한참 아래로 밀어내는 문제가 있었습니다.
@@ -77,6 +78,13 @@ function ReviewList({ reviews, currentUser, onEdit, onDelete, onReport, reported
             </div>
             {date && <p className="mt-1 text-right text-xs text-gray-500">작성일: {date}</p>}
             <ReviewContent content={review.content} />
+            {review.photoUrl && (
+              <img
+                src={`${BASE_URL}${review.photoUrl}`}
+                alt="리뷰 첨부 사진"
+                className="mt-2 max-h-72 max-w-full rounded-lg object-contain"
+              />
+            )}
             {isOwner && (
               <div className="mt-2 flex items-center justify-between text-xs text-gray-400">
                 {/* 본인 리뷰라 추천할 수 없으니(서버도 막음) 버튼이 아니라 숫자만 읽기 전용으로

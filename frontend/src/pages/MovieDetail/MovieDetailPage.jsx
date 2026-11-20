@@ -3,7 +3,16 @@ import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../../auth/AuthContext'
 import { useWishlist } from '../../wishlist/WishlistContext'
 import { getMovieDetail } from '../../api/movieApi'
-import { addReview, deleteReview, getReviews, reportReview, toggleReviewHelpful, updateReview } from '../../api/reviewApi'
+import {
+  addReview,
+  deleteReview,
+  getReviews,
+  removeReviewPhoto,
+  reportReview,
+  toggleReviewHelpful,
+  updateReview,
+  uploadReviewPhoto,
+} from '../../api/reviewApi'
 import { addWatched, isWatched, removeWatched } from '../../api/watchedApi'
 import { recordMovieView } from '../../api/recentlyViewedApi'
 import AiSummaryBox from './components/AiSummaryBox'
@@ -29,6 +38,7 @@ function stripNotFoundPrefix(message) {
 const REVIEW_SORT_OPTIONS = [
   { value: 'latest', label: '최신순' },
   { value: 'rating', label: '평점순' },
+  { value: 'helpful', label: '추천순' },
 ]
 
 function MovieDetailPage() {
@@ -108,12 +118,27 @@ function MovieDetailPage() {
     }
   }
 
-  const handleReviewSubmit = async ({ score, content }) => {
+  const handleReviewSubmit = async ({ score, content, photoFile, photoRemoved }) => {
     try {
-      if (editingReview) {
-        await updateReview(id, editingReview.id, user.id, { movieTitle: detail.title, score, content })
-      } else {
-        await addReview(id, user.id, { movieTitle: detail.title, score, content })
+      const saved = editingReview
+        ? await updateReview(id, editingReview.id, user.id, { movieTitle: detail.title, score, content })
+        : await addReview(id, user.id, { movieTitle: detail.title, score, content })
+      // 사진은 리뷰 자체가 저장되어 reviewId가 확정된 뒤에야 올리거나 뗄 수 있어서, 필요할 때만 이어서
+      // 호출합니다(실패해도 리뷰 자체는 이미 저장됐으니, 사진 처리만 빠진 상태로 안내하고 넘어갑니다).
+      // photoFile(새 사진)이 photoRemoved(기존 사진 떼기)보다 우선입니다 - 다이얼로그에서 미리보기가
+      // 새 사진으로 바뀐 순간 photoRemoved는 이미 false로 돌아가므로 실제로 겹칠 일은 없습니다.
+      if (photoFile) {
+        try {
+          await uploadReviewPhoto(id, saved.id, user.id, photoFile)
+        } catch (photoError) {
+          window.alert(`리뷰는 저장됐지만 사진 첨부에 실패했습니다: ${photoError.message}`)
+        }
+      } else if (photoRemoved && saved.photoUrl) {
+        try {
+          await removeReviewPhoto(id, saved.id, user.id)
+        } catch (photoError) {
+          window.alert(`리뷰는 저장됐지만 사진 삭제에 실패했습니다: ${photoError.message}`)
+        }
       }
       setReviews(await getReviews(id, user.id))
       setDialogOpen(false)
@@ -183,6 +208,9 @@ function MovieDetailPage() {
     if (reviewSort === 'rating') {
       const scoreDiff = (b.score ?? -1) - (a.score ?? -1)
       if (scoreDiff !== 0) return scoreDiff
+    } else if (reviewSort === 'helpful') {
+      const helpfulDiff = (b.helpfulCount ?? 0) - (a.helpfulCount ?? 0)
+      if (helpfulDiff !== 0) return helpfulDiff
     }
     return new Date(b.createdAt) - new Date(a.createdAt)
   })

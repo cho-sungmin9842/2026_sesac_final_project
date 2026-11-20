@@ -42,6 +42,15 @@ public class Review {
     @Column(nullable = false, columnDefinition = "TEXT")
     private String content;
 
+    // 사용자가 직접 첨부한 사진(선택) - "/uploads/reviews/<파일명>" 형태의 서빙 경로입니다(ReviewService 참고).
+    @Column(name = "photo_url", length = 500)
+    private String photoUrl;
+
+    // 디스크에는 충돌 방지를 위해 UUID로 새로 만든 파일명으로 저장되므로, 사용자가 실제로 골랐던
+    // 원본 파일명(확장자 포함)은 따로 기억해둬야 리뷰 수정 화면에 보여줄 수 있습니다.
+    @Column(name = "photo_original_name", length = 255)
+    private String photoOriginalName;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
@@ -64,5 +73,10 @@ public class Review {
         this.score = score;
         this.content = content;
         this.updatedAt = LocalDateTime.now();
+    }
+
+    public void updatePhoto(String photoUrl, String photoOriginalName) {
+        this.photoUrl = photoUrl;
+        this.photoOriginalName = photoOriginalName;
     }
 }

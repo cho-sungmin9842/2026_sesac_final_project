@@ -55,7 +55,9 @@ function QrCodeDecoration({ value }) {
 // 모양 다이얼로그입니다. 가운데 점선 분리선 + 좌우 반원 노치로 실제 영화관 티켓을 반으로 뜯어낸
 // 듯한 모양을 냅니다(노치는 바깥 배경색(검정/70%)과 같은 색 원을 양 끝에 겹쳐서 "구멍"처럼 보이게
 // 만든 것이라, 뒤에 있는 배경과 완벽히 안 맞을 수 있지만 장식 목적으로는 충분합니다).
-function MovieTicketDialog({ booking, onClose }) {
+// confirmLabel: 예매 완료 직후(BookingSeatPage)에는 "확인"으로 눌러서 마이페이지로 이동한다는 느낌을
+// 주고, 마이페이지에서 "모바일 티켓 보기"로 열었을 때는(onClose가 그냥 닫기만 함) 기본값 "닫기"를 씁니다.
+function MovieTicketDialog({ booking, onClose, confirmLabel = '닫기' }) {
   const [posterUrl, setPosterUrl] = useState(null)
   const ticketQrValue = [
     '새싹시네마 모바일 티켓',
@@ -137,7 +139,7 @@ function MovieTicketDialog({ booking, onClose }) {
             onClick={onClose}
             className="w-full rounded-lg bg-indigo-600 py-2 text-sm font-semibold text-white hover:bg-indigo-500"
           >
-            닫기
+            {confirmLabel}
           </button>
         </div>
       </div>
