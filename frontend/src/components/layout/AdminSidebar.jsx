@@ -1,5 +1,8 @@
+import { useState } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../auth/AuthContext'
+import { changePassword } from '../../api/userApi'
+import ChangePasswordDialog from '../../pages/MyPage/components/ChangePasswordDialog'
 import ThemeToggle from '../common/ThemeToggle'
 import VersionBadge from '../common/VersionBadge'
 
@@ -11,14 +14,21 @@ const ADMIN_LINKS = [
 
 // 모바일(md 미만)에서는 기본적으로 화면 밖에 숨겨뒀다가(open=false) AdminLayout의 햄버거 버튼으로
 // 열고 닫는 오버레이로 동작합니다. md 이상(데스크톱)에서는 항상 보이는 고정 사이드바입니다.
+// 관리자도 일반 사용자와 같은 비밀번호 변경 규칙/API를 그대로 쓰므로, 마이페이지의
+// ChangePasswordDialog를 그대로 재사용합니다(2026-11-24 요청 - 그 전에는 관리자 쪽엔 비밀번호를
+// 바꿀 방법이 아예 없었음).
 function AdminSidebar({ open, onClose }) {
-  const { logout } = useAuth()
+  const { user, logout } = useAuth()
   const navigate = useNavigate()
+  const [showChangePassword, setShowChangePassword] = useState(false)
 
   const handleLogout = () => {
     logout()
     navigate('/login', { replace: true })
   }
+
+  const handleChangePassword = ({ currentPassword, newPassword }) =>
+    changePassword(user.id, { currentPassword, newPassword })
 
   return (
     <>
@@ -73,13 +83,23 @@ function AdminSidebar({ open, onClose }) {
         <div className="border-t border-white/5 px-2 pt-4 text-sm text-gray-400">
           <p className="mb-2 truncate">관리자</p>
           <div className="flex items-center justify-between">
-            <button type="button" onClick={handleLogout} className="text-xs hover:text-white">
-              로그아웃
-            </button>
+            <div className="flex items-center gap-2 text-xs">
+              <button type="button" onClick={() => setShowChangePassword(true)} className="hover:text-white">
+                비밀번호 변경
+              </button>
+              <span className="text-gray-700">|</span>
+              <button type="button" onClick={handleLogout} className="hover:text-white">
+                로그아웃
+              </button>
+            </div>
             <ThemeToggle />
           </div>
         </div>
       </aside>
+
+      {showChangePassword && (
+        <ChangePasswordDialog onClose={() => setShowChangePassword(false)} onSubmit={handleChangePassword} />
+      )}
     </>
   )
 }
