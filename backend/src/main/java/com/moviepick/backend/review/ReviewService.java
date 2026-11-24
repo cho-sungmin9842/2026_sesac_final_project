@@ -6,12 +6,17 @@ import com.moviepick.backend.common.ApiException;
 import com.moviepick.backend.config.UploadProperties;
 import com.moviepick.backend.movie.MovieTitleResolver;
 import com.moviepick.backend.notification.NotificationService;
+import com.moviepick.backend.review.dto.AdminReviewPageDto;
+import com.moviepick.backend.review.dto.AdminReviewStatsDto;
 import com.moviepick.backend.review.dto.ReviewDeletionLogDto;
 import com.moviepick.backend.review.dto.ReviewDto;
+import com.moviepick.backend.review.dto.ReviewFilterOptionDto;
 import com.moviepick.backend.review.dto.ReviewHelpfulResponse;
 import com.moviepick.backend.review.dto.ReviewReportDetailDto;
 import com.moviepick.backend.review.dto.ReviewRequest;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -21,6 +26,8 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashSet;
@@ -106,21 +113,68 @@ public class ReviewService {
                 .toList();
     }
 
-    // 관리자 "리뷰 관리" 화면 - DB에 저장된 모든 사용자의 리뷰를 전부 조회하고, 리뷰마다 "신고 N건"
-    // 뱃지를 달 수 있도록 신고 수도 같이 내려줍니다(0건이면 신고 안 된 리뷰).
-    public List<ReviewDto> listAllForAdmin(Long adminUserId) {
+    // 관리자 "리뷰 관리" 화면 - 검색/정렬/페이지네이션을 전부 서버에서 처리합니다(2026-11-21에
+    // 클라이언트 전체 필터링에서 옮김). 리뷰마다 "신고 N건" 뱃지를 달 수 있도록 신고 수도 같이
+    // 내려줍니다(0건이면 신고 안 된 리뷰) - 신고 수는 지금 페이지 분량만 집계하므로 가볍습니다.
+    public AdminReviewPageDto listAllForAdmin(
+            Long adminUserId, int page, int size, String sort,
+            String movieTitle, String authorNickname, boolean reportedOnly,
+            LocalDate dateFrom, LocalDate dateTo, String content
+    ) {
         requireAdmin(adminUserId);
-        List<ReviewDto> dtos = toDtos(reviewRepository.findAllByOrderByCreatedAtDescIdDesc());
+        // dateTo는 "그날까지 포함"이라, 다음 날 00:00 미만으로 바꿔 비교합니다(createdAt은 시각까지 있음).
+        LocalDateTime dateFromTime = dateFrom == null ? null : dateFrom.atStartOfDay();
+        LocalDateTime dateToExclusive = dateTo == null ? null : dateTo.plusDays(1).atStartOfDay();
+        Page<Review> reviewPage = reviewRepository.searchForAdmin(
+                blankToNull(movieTitle), blankToNull(authorNickname), reportedOnly,
+                dateFromTime, dateToExclusive, blankToNull(content), sort, PageRequest.of(page, size)
+        );
+        List<ReviewDto> dtos = toDtos(reviewPage.getContent());
         List<Long> reviewIds = dtos.stream().map(ReviewDto::id).toList();
         Map<Long, Long> reportCounts = reviewIds.isEmpty() ? Map.of() : reviewReportRepository.countByReviewIds(reviewIds).stream()
                 .collect(Collectors.toMap(ReviewReportRepository.ReportCountRow::getReviewId, ReviewReportRepository.ReportCountRow::getCnt));
-        return dtos.stream()
+        List<ReviewDto> withReportCounts = dtos.stream()
                 .map(dto -> new ReviewDto(
                         dto.id(), dto.movieId(), dto.movieTitle(), dto.userId(), dto.authorNickname(),
                         dto.score(), dto.content(), dto.photoUrl(), dto.photoOriginalName(), dto.createdAt(), dto.updatedAt(),
                         dto.helpfulCount(), dto.helpfulByMe(), reportCounts.getOrDefault(dto.id(), 0L)
                 ))
                 .toList();
+        return new AdminReviewPageDto(withReportCounts, page, reviewPage.getTotalPages(), reviewPage.getTotalElements());
+    }
+
+    private static String blankToNull(String value) {
+        return (value == null || value.isBlank()) ? null : value;
+    }
+
+    // "전체 선택"(페이지를 넘나드는 선택) - 지금 필터에 맞는 리뷰 전체의 id만 가볍게 돌려줍니다.
+    public List<Long> getAdminReviewIds(
+            Long adminUserId, String movieTitle, String authorNickname, boolean reportedOnly,
+            LocalDate dateFrom, LocalDate dateTo, String content
+    ) {
+        requireAdmin(adminUserId);
+        LocalDateTime dateFromTime = dateFrom == null ? null : dateFrom.atStartOfDay();
+        LocalDateTime dateToExclusive = dateTo == null ? null : dateTo.plusDays(1).atStartOfDay();
+        return reviewRepository.findIdsForAdmin(
+                blankToNull(movieTitle), blankToNull(authorNickname), reportedOnly, dateFromTime, dateToExclusive,
+                blankToNull(content)
+        );
+    }
+
+    // 필터 드롭다운(영화 제목/작성자 닉네임) 선택지 - 실제로 리뷰가 존재하는 조합만 내려줍니다.
+    public List<ReviewFilterOptionDto> getAdminFilterOptions(Long adminUserId) {
+        requireAdmin(adminUserId);
+        return reviewRepository.findDistinctFilterOptions().stream()
+                .map(row -> new ReviewFilterOptionDto(row.getMovieTitle(), row.getAuthorNickname()))
+                .toList();
+    }
+
+    // "리뷰 관리" 상단 통계 카드 - 검색/필터와 무관하게 DB 전체 기준입니다.
+    public AdminReviewStatsDto getAdminStats(Long adminUserId) {
+        requireAdmin(adminUserId);
+        long total = reviewRepository.count();
+        long today = reviewRepository.countCreatedOnOrAfter(LocalDate.now().atStartOfDay());
+        return new AdminReviewStatsDto(total, today);
     }
 
     // "리뷰 관리" 테이블의 "신고 N건" 뱃지 - 이 리뷰에 달린 신고 전부(사유/신고자/시각)를 보여줍니다.

@@ -39,19 +39,22 @@ function WriteReviewDialog({ movieTitle, initialReview, onSubmit, onClose }) {
   const [photoRemoved, setPhotoRemoved] = useState(false)
   const fileInputRef = useRef(null)
 
+  // 파일 선택창을 열었다가 "취소"하는 것 외에, "사진 삭제" 버튼으로도 직접 뗄 수 있게 합니다
+  // (2026-11-21 요청 - 취소 버튼만으로는 찾기 어려운 조작이라는 지적).
+  const clearPhoto = () => {
+    setPhotoFile(null)
+    setPhotoPreviewUrl(null)
+    setPhotoRemoved(true)
+    // input 자체의 값(브라우저가 버튼 옆에 직접 그려주는 파일명 표시)은 자동으로 비워지지 않아서,
+    // 그대로 두면 미리보기는 사라졌는데 파일명 글자만 남아있게 됩니다.
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
   useEffect(() => {
     const input = fileInputRef.current
     if (!input) return undefined
-    const handleCancel = () => {
-      setPhotoFile(null)
-      setPhotoPreviewUrl(null)
-      setPhotoRemoved(true)
-      // input 자체의 값(브라우저가 버튼 옆에 직접 그려주는 파일명 표시)은 cancel 이벤트로 자동으로
-      // 비워지지 않아서, 그대로 두면 미리보기는 사라졌는데 파일명 글자만 남아있게 됩니다.
-      input.value = ''
-    }
-    input.addEventListener('cancel', handleCancel)
-    return () => input.removeEventListener('cancel', handleCancel)
+    input.addEventListener('cancel', clearPhoto)
+    return () => input.removeEventListener('cancel', clearPhoto)
   }, [])
 
   const handlePhotoChange = (event) => {
@@ -151,6 +154,15 @@ function WriteReviewDialog({ movieTitle, initialReview, onSubmit, onClose }) {
                 파일 선택
               </button>
               <span className="truncate text-xs text-gray-400">{displayedFileName}</span>
+              {displayedPhotoUrl && (
+                <button
+                  type="button"
+                  onClick={clearPhoto}
+                  className="shrink-0 text-xs text-rose-400 hover:underline"
+                >
+                  사진 삭제
+                </button>
+              )}
             </div>
             <input
               ref={fileInputRef}

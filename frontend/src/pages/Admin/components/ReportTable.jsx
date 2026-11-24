@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react'
 import HorizontalScroll from '../../../components/common/HorizontalScroll'
 
 function formatDateTime(dateTimeStr) {
@@ -13,14 +14,41 @@ function formatDateTime(dateTimeStr) {
 // 컬럼이 많아 좁은 화면(모바일)에서는 표가 찌그러지므로, 가로 스크롤로 보게끔 감쌉니다.
 // allSelected: 지금 페이지가 아니라 검색/필터에 맞는 전체 기준 - AdminReportsPage가 계산해서 넘겨줍니다
 // (이 페이지만 보고 판단하면, 전체 선택 후 다른 페이지로 넘어갔을 때 헤더 체크박스가 틀리게 보입니다).
-function ReportTable({ reviews, selectedIds, allSelected, onToggleSelect, onToggleSelectAll, onDelete, onViewReports, onViewDetail }) {
+// someSelected: 전체는 아니지만 일부라도 선택됐는지 - 체크박스의 "일부 선택" 모양(indeterminate)은
+// checked 속성처럼 JSX로 선언할 수 없고 DOM 엘리먼트에 직접 값을 넣어줘야만 해서 ref로 처리합니다
+// (2026-11-24 요청 - 그 전에는 일부만 선택돼도 체크박스가 그냥 빈 채로 보여서 구분이 안 갔습니다).
+function ReportTable({
+  reviews,
+  selectedIds,
+  allSelected,
+  someSelected,
+  onToggleSelect,
+  onToggleSelectAll,
+  onDelete,
+  onViewReports,
+  onViewDetail,
+}) {
+  const selectAllRef = useRef(null)
+
+  useEffect(() => {
+    if (selectAllRef.current) {
+      selectAllRef.current.indeterminate = someSelected && !allSelected
+    }
+  }, [someSelected, allSelected])
+
   return (
     <HorizontalScroll>
       <table className="w-full min-w-[760px] text-left text-sm">
         <thead>
           <tr className="border-b border-white/5 text-gray-400">
             <th className="w-8 py-3">
-              <input type="checkbox" checked={allSelected} onChange={onToggleSelectAll} aria-label="전체 선택" />
+              <input
+                ref={selectAllRef}
+                type="checkbox"
+                checked={allSelected}
+                onChange={onToggleSelectAll}
+                aria-label="전체 선택"
+              />
             </th>
             <th className="py-3 font-medium">영화</th>
             <th className="py-3 font-medium">작성자</th>

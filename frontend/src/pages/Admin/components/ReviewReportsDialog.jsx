@@ -122,14 +122,18 @@ function ReviewReportsDialog({ adminUserId, reviewId, onClose, onReviewDeleted, 
                         {report.reporterNickname} · {formatDateTime(report.reportedAt)}
                       </p>
                     </div>
-                    <button
-                      type="button"
-                      disabled={actingId !== null}
-                      onClick={() => handleCancelOne(report.id)}
-                      className="shrink-0 rounded-lg border border-slate-700 px-3 py-1.5 text-xs font-semibold text-gray-300 hover:bg-slate-800 disabled:opacity-50"
-                    >
-                      {actingId === report.id ? '처리 중...' : '신고 취소'}
-                    </button>
+                    {/* 리뷰 자체가 삭제되면 이 신고 기록도 DB에서 같이 사라지므로(ON DELETE CASCADE),
+                        삭제 후에는 더 이상 취소할 대상이 없어 버튼을 더 보여주지 않습니다. */}
+                    {!reviewDeleted && (
+                      <button
+                        type="button"
+                        disabled={actingId !== null}
+                        onClick={() => handleCancelOne(report.id)}
+                        className="shrink-0 rounded-lg border border-slate-700 px-3 py-1.5 text-xs font-semibold text-gray-300 hover:bg-slate-800 disabled:opacity-50"
+                      >
+                        {actingId === report.id ? '처리 중...' : '신고 취소'}
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>

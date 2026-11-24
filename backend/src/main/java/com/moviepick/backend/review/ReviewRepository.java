@@ -1,9 +1,12 @@
 package com.moviepick.backend.review;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.List;
 
@@ -16,8 +19,93 @@ public interface ReviewRepository extends JpaRepository<Review, Long> {
     // 이유로, 영화 상세 리뷰 목록과 관리자 "리뷰 관리" 목록에도 2026-11-20에 같은 문제가 발견돼 적용).
     List<Review> findByMovieIdOrderByCreatedAtDescIdDesc(String movieId);
 
-    // 관리자 "리뷰 신고 관리" 화면 - 특정 영화/사용자로 좁히지 않고 DB에 저장된 모든 사용자의 리뷰를 보여줍니다.
-    List<Review> findAllByOrderByCreatedAtDescIdDesc();
+    // 관리자 "리뷰 관리" 화면의 검색/정렬/페이지네이션 - 리뷰가 많아져도 매번 전체를 불러와 브라우저에서
+    // 거르지 않도록 2026-11-21에 서버 쪽으로 옮겼습니다. movieTitle 비교는 reviews.movie_title이 아니라
+    // movies.title(있으면 그 값, 없으면 저장된 값)로 맞춥니다 - 화면에 보여주는 값(ReviewDto)도 그 기준이라
+    // 둘이 다르면 드롭다운에서 고른 제목으로 필터링해도 하나도 안 걸리는 문제가 생깁니다. 정렬 기준(sort)은
+    // "latest"/"rating"/"reportCount" 중 하나만 들어오고, 나머지 두 CASE는 모든 행에서 NULL이라 순서에
+    // 영향을 주지 않습니다 - 그 뒤로 createdAt/id가 항상 최종 동점 처리 기준이 됩니다(2026-11-20에 고친
+    // "같은 초에 쓰인 리뷰 순서 뒤섞임" 버그와 같은 이유로 둘 다 넣어둠).
+    // content: 리뷰 내용 텍스트 검색(부분 일치, 대소문자 구분 없음) - 영화 제목/작성자처럼 드롭다운으로
+    // 고르는 값이 아니라 자유 입력이라, 따로 lower()로 감싸 대소문자를 가립니다(2026-11-24 요청).
+    @Query(
+            value = """
+                    select r from Review r
+                    where (:movieTitle is null or coalesce((select m.title from Movie m where m.movieId = r.movieId), r.movieTitle) = :movieTitle)
+                      and (:authorNickname is null or r.user.nickname = :authorNickname)
+                      and (:reportedOnly = false or (select count(rr) from ReviewReport rr where rr.review = r) > 0)
+                      and (:dateFrom is null or r.createdAt >= :dateFrom)
+                      and (:dateTo is null or r.createdAt < :dateTo)
+                      and (:content is null or lower(r.content) like lower(concat('%', :content, '%')))
+                    order by
+                      case when :sort = 'rating' then r.score end desc,
+                      case when :sort = 'reportCount' then (select count(rr2) from ReviewReport rr2 where rr2.review = r) end desc,
+                      r.createdAt desc,
+                      r.id desc
+                    """,
+            countQuery = """
+                    select count(r) from Review r
+                    where (:movieTitle is null or coalesce((select m.title from Movie m where m.movieId = r.movieId), r.movieTitle) = :movieTitle)
+                      and (:authorNickname is null or r.user.nickname = :authorNickname)
+                      and (:reportedOnly = false or (select count(rr) from ReviewReport rr where rr.review = r) > 0)
+                      and (:dateFrom is null or r.createdAt >= :dateFrom)
+                      and (:dateTo is null or r.createdAt < :dateTo)
+                      and (:content is null or lower(r.content) like lower(concat('%', :content, '%')))
+                    """
+    )
+    Page<Review> searchForAdmin(
+            @Param("movieTitle") String movieTitle,
+            @Param("authorNickname") String authorNickname,
+            @Param("reportedOnly") boolean reportedOnly,
+            @Param("dateFrom") LocalDateTime dateFrom,
+            @Param("dateTo") LocalDateTime dateTo,
+            @Param("content") String content,
+            @Param("sort") String sort,
+            Pageable pageable
+    );
+
+    // "전체 선택"(페이지를 넘나드는 선택)을 누르면 지금 필터에 맞는 리뷰 전체의 id가 필요합니다 - 체크박스
+    // 상태만 결정하면 되니 리뷰 내용 전체가 아니라 id만 가볍게 받아옵니다.
+    @Query("""
+            select r.id from Review r
+            where (:movieTitle is null or coalesce((select m.title from Movie m where m.movieId = r.movieId), r.movieTitle) = :movieTitle)
+              and (:authorNickname is null or r.user.nickname = :authorNickname)
+              and (:reportedOnly = false or (select count(rr) from ReviewReport rr where rr.review = r) > 0)
+              and (:dateFrom is null or r.createdAt >= :dateFrom)
+              and (:dateTo is null or r.createdAt < :dateTo)
+              and (:content is null or lower(r.content) like lower(concat('%', :content, '%')))
+            """)
+    List<Long> findIdsForAdmin(
+            @Param("movieTitle") String movieTitle,
+            @Param("authorNickname") String authorNickname,
+            @Param("reportedOnly") boolean reportedOnly,
+            @Param("dateFrom") LocalDateTime dateFrom,
+            @Param("dateTo") LocalDateTime dateTo,
+            @Param("content") String content
+    );
+
+    // 필터 드롭다운(영화 제목/작성자 닉네임) 선택지 - 실제로 리뷰가 존재하는 조합만, 표시 제목도 위
+    // searchForAdmin과 같은 기준(movies.title 우선)으로 내려줍니다. 두 드롭다운을 서로 연동시키는 데도
+    // 이 조합 목록을 그대로 씁니다(AdminReportsPage 참고).
+    @Query("""
+            select distinct
+                coalesce((select m.title from Movie m where m.movieId = r.movieId), r.movieTitle) as movieTitle,
+                r.user.nickname as authorNickname
+            from Review r
+            """)
+    List<FilterOptionRow> findDistinctFilterOptions();
+
+    interface FilterOptionRow {
+        String getMovieTitle();
+
+        String getAuthorNickname();
+    }
+
+    // 관리자 "리뷰 관리" 상단 통계 카드의 "오늘 작성된 리뷰" - 검색/필터와 무관하게 DB 전체 기준입니다
+    // (searchForAdmin이 필터링된 페이지만 돌려주게 된 뒤로 따로 둬야 함). "전체 리뷰"는 JpaRepository가
+    // 이미 제공하는 count()를 그대로 씁니다.
+    @Query("select count(r) from Review r where r.createdAt >= :todayStart")
+    long countCreatedOnOrAfter(@Param("todayStart") LocalDateTime todayStart);
 
     // 마이페이지 "내가 쓴 리뷰" 탭 - 영화 구분 없이 이 사용자가 쓴 모든 리뷰.
     List<Review> findByUserIdOrderByCreatedAtDescIdDesc(Long userId);

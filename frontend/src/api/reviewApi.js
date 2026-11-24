@@ -71,9 +71,44 @@ export function getMyReviews(userId) {
   return request('/api/reviews/mine', { userId })
 }
 
-// 관리자 "리뷰 관리" 화면 - DB에 저장된 모든 사용자의 리뷰 전체.
-export function getAllReviewsForAdmin(adminUserId) {
-  return request('/api/admin/reviews', { userId: adminUserId })
+// 관리자 "리뷰 관리" 화면 - 검색/정렬/페이지네이션은 서버에서 처리합니다. page는 0부터 시작합니다
+// (Pageable 관례 - AdminReportsPage의 1-based 화면 페이지 번호를 호출 시 변환해서 넘겨줍니다).
+export function getAllReviewsForAdmin(adminUserId, params = {}) {
+  const query = new URLSearchParams()
+  if (params.page != null) query.set('page', params.page)
+  if (params.size != null) query.set('size', params.size)
+  if (params.sort) query.set('sort', params.sort)
+  if (params.movieTitle) query.set('movieTitle', params.movieTitle)
+  if (params.authorNickname) query.set('authorNickname', params.authorNickname)
+  if (params.reportedOnly) query.set('reportedOnly', 'true')
+  if (params.dateFrom) query.set('dateFrom', params.dateFrom)
+  if (params.dateTo) query.set('dateTo', params.dateTo)
+  if (params.content) query.set('content', params.content)
+  const queryString = query.toString()
+  return request(`/api/admin/reviews${queryString ? `?${queryString}` : ''}`, { userId: adminUserId })
+}
+
+// "전체 선택"(페이지를 넘나드는 선택) - 지금 필터에 맞는 리뷰 전체의 id만 가볍게 받아옵니다.
+export function getAdminReviewIds(adminUserId, params = {}) {
+  const query = new URLSearchParams()
+  if (params.movieTitle) query.set('movieTitle', params.movieTitle)
+  if (params.authorNickname) query.set('authorNickname', params.authorNickname)
+  if (params.reportedOnly) query.set('reportedOnly', 'true')
+  if (params.dateFrom) query.set('dateFrom', params.dateFrom)
+  if (params.dateTo) query.set('dateTo', params.dateTo)
+  if (params.content) query.set('content', params.content)
+  const queryString = query.toString()
+  return request(`/api/admin/reviews/ids${queryString ? `?${queryString}` : ''}`, { userId: adminUserId })
+}
+
+// "리뷰 관리" 필터 드롭다운(영화 제목/작성자 닉네임) 선택지 - 실제로 리뷰가 존재하는 조합만.
+export function getAdminReviewFilterOptions(adminUserId) {
+  return request('/api/admin/reviews/filter-options', { userId: adminUserId })
+}
+
+// "리뷰 관리" 상단 통계 카드("전체 리뷰"/"오늘 작성된 리뷰") - 검색/필터와 무관하게 DB 전체 기준.
+export function getAdminReviewStats(adminUserId) {
+  return request('/api/admin/reviews/stats', { userId: adminUserId })
 }
 
 export function deleteReviewAsAdmin(reviewId, adminUserId) {

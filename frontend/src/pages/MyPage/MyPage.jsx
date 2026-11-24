@@ -6,6 +6,7 @@ import { getWishlist } from '../../api/wishlistApi'
 import { getWatched } from '../../api/watchedApi'
 import { cancelBooking, getMyBookings } from '../../api/bookingApi'
 import { deleteReview, getMyReviews, updateReview } from '../../api/reviewApi'
+import { BASE_URL } from '../../api/httpClient'
 import { changePassword, deleteAccount, getPreferredGenres, updatePreferredGenres } from '../../api/userApi'
 import { getGenres, getNowShowing } from '../../api/movieApi'
 import { genreLabel } from '../MovieList/components/filterOptions'
@@ -375,6 +376,13 @@ function MyReviewList({ reviews, onEdit, onDelete }) {
             </span>
           </div>
           <p className="mt-2 text-sm text-gray-300">{review.content}</p>
+          {review.photoUrl && (
+            <img
+              src={`${BASE_URL}${review.photoUrl}`}
+              alt="리뷰 첨부 사진"
+              className="mt-2 max-h-72 max-w-full rounded-lg object-contain"
+            />
+          )}
           <div className="mt-2 flex items-center justify-between text-xs text-gray-400">
             <span>👍 도움이 됐어요 {review.helpfulCount ?? 0}명</span>
             <div className="flex gap-2">
